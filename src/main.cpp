@@ -2,14 +2,11 @@
 #include "../include/game.hpp"
 #include <random>
 #include <thread>
+#include <string>
 
 template <std::size_t N>
-bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card> playerCards, const std::span<const Card> tableCards)
+bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards)
 {
-    if (playerCards.size() != 2 || tableCards.size() > 5)
-    {
-        return false;
-    }
     Deck deck(rng);
     deck.removeCards(playerCards);
     deck.removeCards(tableCards);
@@ -22,8 +19,12 @@ bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card> playerCards, c
     std::array<Card, 5> tableCardsCopy;
     std::copy(tableCards.begin(), tableCards.end(), tableCardsCopy.begin());
     std::copy(tableValue.begin(), tableValue.end(), tableCardsCopy.begin() + tableCards.size());
-    std::array<Player, N> players{};
-    for (int i = 0; i < N - 1; ++i)
+    ClassificationResult mainResult = classifyPlayer(playerCards, tableCardsCopy);
+    if (mainResult.classification == Classification::RoyalFlush)
+    {
+        return true;
+    }
+    for (std::size_t i = 0; i < N - 1; ++i)
     {
         auto cards = deck.dealToPlayer();
         if (!cards.has_value())
@@ -31,15 +32,16 @@ bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card> playerCards, c
             return false;
         }
         auto &cardsValue = cards.value();
-        players[i] = Player(cardsValue[0], cardsValue[1], tableCardsCopy);
+        ClassificationResult playerResult = classifyPlayer(cardsValue, tableCardsCopy);
+        if (playerResult > mainResult)
+        {
+            return false;
+        }
     }
-    players[N - 1] = Player(playerCards[0], playerCards[1], tableCardsCopy);
-    Game<N> game(players, tableCardsCopy);
-    auto results = game.classify();
-    return results[0].first == players[N - 1];
+    return true;
 }
 template <std::size_t N>
-inline double probabilityOfWinning(pcg64 &rng, const std::span<const Card> playerCards, const std::span<const Card> tableCards, std::size_t numSimulations)
+inline double probabilityOfWinning(pcg64 &rng, const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards, std::size_t numSimulations)
 {
     std::size_t wins = 0;
     for (std::size_t i = 0; i < numSimulations; ++i)
@@ -52,7 +54,7 @@ inline double probabilityOfWinning(pcg64 &rng, const std::span<const Card> playe
     return static_cast<double>(wins) / numSimulations;
 }
 template <std::size_t N>
-inline double probabilityOfWinning(const std::span<const Card> playerCards, const std::span<const Card> tableCards, std::size_t numSimulations, std::size_t numThreads)
+inline double probabilityOfWinning(const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards, std::size_t numSimulations, std::size_t numThreads)
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);
@@ -82,7 +84,7 @@ inline double probabilityOfWinning(const std::span<const Card> playerCards, cons
     }
     return static_cast<double>(totalWins) / (simulationsPerThread * numThreads);
 }
-inline constexpr bool checkUniqueCards(const std::span<const Card> cardsPlayer, const std::span<const Card> cardsTable)
+inline constexpr bool checkUniqueCards(const std::span<const Card, 2> cardsPlayer, const std::span<const Card> cardsTable)
 {
     for (std::size_t i = 0; i < cardsPlayer.size(); ++i)
     {
@@ -116,14 +118,45 @@ inline constexpr bool checkUniqueCards(const std::span<const Card> cardsPlayer, 
     }
     return true;
 }
+
+inline double runGame(std::span<const Card, 2> playerCardsSpan, std::span<const Card> tableCardsSpan, std::size_t numPlayers, std::size_t threadCount)
+{
+    if (numPlayers < 2 || numPlayers > 10)
+    {
+        return 0.0;
+    }
+    switch (numPlayers)
+    {
+    case 2:
+        return probabilityOfWinning<2>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 3:
+        return probabilityOfWinning<3>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 4:
+        return probabilityOfWinning<4>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 5:
+        return probabilityOfWinning<5>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 6:
+        return probabilityOfWinning<6>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 7:
+        return probabilityOfWinning<7>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 8:
+        return probabilityOfWinning<8>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 9:
+        return probabilityOfWinning<9>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    case 10:
+        return probabilityOfWinning<10>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+    default:
+        return 0.0;
+    }
+}
+
 int main(int argc, const char** argv)
 {
-    if (argc < 3)
+    if (argc < 4)
     {
-        std::cerr << "Usage: " << argv[0] << " <hand> <table>\n";
+        std::cerr << "Usage: " << argv[0] << " <hand> <table> <num_players>\n";
         return 1;
     }
-    static constexpr std::size_t numPlayers = 5;
     std::string_view playerHand = argv[1];
     std::optional<std::vector<Card>> playerCards = Card::parseHand(playerHand);
     if (!playerCards.has_value() || playerCards->size() != 2)
@@ -132,7 +165,7 @@ int main(int argc, const char** argv)
         return 1;
     }
     std::vector<Card>& playerCardsValue = *playerCards;
-    std::array<Card, 2> playerCardsArray = {playerCardsValue[0], playerCardsValue[1]};
+    std::span<const Card, 2> playerCardsSpan(playerCardsValue.data(), playerCardsValue.size());
     std::string_view tableCardsStr = argv[2];
     std::optional<std::vector<Card>> tableCards = Card::parseHand(tableCardsStr);
     if (!tableCards.has_value() || tableCards->size() > 5)
@@ -141,7 +174,8 @@ int main(int argc, const char** argv)
         return 1;
     }
     std::vector<Card>& tableCardsValue = *tableCards;
-    if (!checkUniqueCards(playerCardsValue, tableCardsValue))
+    std::span<const Card> tableCardsSpan(tableCardsValue.data(), tableCardsValue.size());
+    if (!checkUniqueCards(playerCardsSpan, tableCardsSpan))
     {
         std::cerr << "Duplicate cards found in hand or table.\n";
         return 1;
@@ -150,8 +184,15 @@ int main(int argc, const char** argv)
     Deck deck(rng);
     std::cout << "Player cards: " << playerCardsValue[0] << ", " << playerCardsValue[1] << '\n';
     std::size_t threadCount = std::thread::hardware_concurrency();
+    std::string numPlayersStr = argv[3];
+    std::size_t numPlayers = std::stoul(numPlayersStr);
+    if (numPlayers < 2 || numPlayers > 10)
+    {
+        std::cerr << "Number of players must be between 2 and 10.\n";
+        return 1;
+    }
     auto start = std::chrono::high_resolution_clock::now();
-    std::cout << "Probability of winning: " << probabilityOfWinning<numPlayers>(playerCardsArray, tableCardsValue, 1'000'000, threadCount) * 100 << "%\n";
+    std::cout << "Probability of winning: " << runGame(playerCardsSpan, tableCardsSpan, numPlayers, threadCount) * 100 << "%\n";
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";
     return 0;

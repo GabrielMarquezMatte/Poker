@@ -15,7 +15,7 @@ private:
         {
             for (int j = 0; j < 13; ++j)
             {
-                m_cards[i * 13 + j] = {static_cast<Suit>(i), static_cast<Rank>(1 << j)};
+                m_cards[i * 13 + j] = {static_cast<Suit>(1 << i), static_cast<Rank>(1 << j)};
             }
         }
         std::shuffle(m_cards.begin(), m_cards.end(), rng);

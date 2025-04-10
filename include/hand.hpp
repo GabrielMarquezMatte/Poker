@@ -7,20 +7,19 @@
 struct Hand
 {
 private:
-    std::array<Card, 5> m_cards;
-    inline constexpr Rank getRanks() const
+    static inline constexpr Rank getRanks(const std::span<const Card, 5> cards)
     {
         Rank ranks = Rank::Two;
-        for (const Card card : m_cards)
+        for (const Card card : cards)
         {
             ranks = ranks | card.getRank();
         }
         return ranks;
     }
-    inline constexpr std::pair<bool, Rank> getStraight() const
+    static inline constexpr std::pair<bool, Rank> getStraight(const std::span<const Card, 5> cards)
     {
         // Special Ace-low case: 2,3,4,5,A
-        Rank cardRanks = getRanks();
+        Rank cardRanks = getRanks(cards);
         if (cardRanks == Rank::LowStraight)
         {
             return {true, Rank::Five};
@@ -35,44 +34,18 @@ private:
                 return {true, static_cast<Rank>(1 << (i + 4))};
             }
         }
-        return {false, m_cards[4].getRank()};
+        int highestBit = std::bit_width(static_cast<uint32_t>(cardRanks)) - 1;
+        return {false, static_cast<Rank>(1 << highestBit)};
     }
 public:
-    inline constexpr Hand() = default;
-    // Construct a hand from 5 cards and sort them in ascending order
-    inline constexpr Hand(Card c1, Card c2, Card c3, Card c4, Card c5): m_cards{c1, c2, c3, c4, c5}
+    static inline constexpr ClassificationResult classify(const std::span<const Card, 5> cards)
     {
-        std::sort(m_cards.begin(), m_cards.end(), [](const Card &a, const Card &b)
-                  { return static_cast<int>(a.getRank()) < static_cast<int>(b.getRank()); });
-    }
-    inline constexpr Hand(const std::array<Card, 5> &cards)
-        : m_cards(cards)
-    {
-        std::sort(m_cards.begin(), m_cards.end(), [](const Card &a, const Card &b)
-                  { return static_cast<int>(a.getRank()) < static_cast<int>(b.getRank()); });
-    }
-    inline constexpr Hand(const std::span<const Card> cards)
-    {
-        if (cards.size() != 5)
-        {
-            throw std::invalid_argument("Hand must have exactly 5 cards.");
-        }
-        std::copy(cards.begin(), cards.end(), m_cards.begin());
-        std::sort(m_cards.begin(), m_cards.end(), [](const Card &a, const Card &b)
-                  { return static_cast<int>(a.getRank()) < static_cast<int>(b.getRank()); });
-    }
-    inline constexpr std::span<const Card, 5> cards() const
-    {
-        return m_cards;
-    }
-    inline constexpr ClassificationResult classify() const
-    {
-        bool flush = (m_cards[0].getSuit() == m_cards[1].getSuit() &&
-                      m_cards[1].getSuit() == m_cards[2].getSuit() &&
-                      m_cards[2].getSuit() == m_cards[3].getSuit() &&
-                      m_cards[3].getSuit() == m_cards[4].getSuit());
+        bool flush = (cards[0].getSuit() == cards[1].getSuit() &&
+                      cards[1].getSuit() == cards[2].getSuit() &&
+                      cards[2].getSuit() == cards[3].getSuit() &&
+                      cards[3].getSuit() == cards[4].getSuit());
         // Check for a straight.
-        auto [straight, straightHigh] = getStraight();
+        auto [straight, straightHigh] = getStraight(cards);
         if (flush && straight)
         {
             // For a royal flush the high card is Ace.
@@ -84,7 +57,7 @@ public:
         }
         // Build a frequency table for ranks.
         std::array<std::pair<Rank, int>, 13> rankCounts;
-        for (const auto &card : m_cards)
+        for (const auto &card : cards)
         {
             std::size_t index = getRankIndex(card.getRank());
             int count = rankCounts[index].second;
@@ -105,15 +78,15 @@ public:
                     return static_cast<uint32_t>(a.first) > static_cast<uint32_t>(b.first); });
         if (rankCounts[0].second == 4)
         {
-            return {Classification::FourOfAKind, getRanks()};
+            return {Classification::FourOfAKind, getRanks(cards)};
         }
         if (rankCounts[0].second == 3 && rankCounts[1].second >= 2)
         {
-            return {Classification::FullHouse, getRanks()};
+            return {Classification::FullHouse, getRanks(cards)};
         }
         if (flush)
         {
-            return {Classification::Flush, getRanks()};
+            return {Classification::Flush, getRanks(cards)};
         }
         if (straight)
         {
@@ -121,17 +94,17 @@ public:
         }
         if (rankCounts[0].second == 3)
         {
-            return {Classification::ThreeOfAKind, getRanks()};
+            return {Classification::ThreeOfAKind, getRanks(cards)};
         }
         if (rankCounts[0].second != 2)
         {
-            return {Classification::HighCard, getRanks()};
+            return {Classification::HighCard, getRanks(cards)};
         }
         if (rankCounts[1].second == 2)
         {
-            return {Classification::TwoPair, getRanks()};
+            return {Classification::TwoPair, getRanks(cards)};
         }
-        return {Classification::Pair, getRanks()};
+        return {Classification::Pair, getRanks(cards)};
     }
 };
 #endif // __POKER_HAND_HPP__

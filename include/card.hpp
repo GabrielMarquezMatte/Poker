@@ -70,47 +70,6 @@ private:
     }
 
 public:
-    struct CardParseIterator
-    {
-        std::string_view str;
-        std::size_t pos = 0;
-        inline constexpr CardParseIterator(std::string_view str) : str(str) {}
-        inline constexpr CardParseIterator(std::string_view str, std::size_t pos) : str(str), pos(pos) {}
-        inline constexpr bool operator!=(const CardParseIterator &other) const
-        {
-            return pos != other.pos;
-        }
-        inline constexpr CardParseIterator &operator++()
-        {
-            pos = str.find(' ', pos);
-            if (pos != std::string_view::npos)
-            {
-                ++pos;
-            }
-            return *this;
-        }
-        inline constexpr std::optional<Card> operator*() const
-        {
-            if (pos >= str.size())
-            {
-                return std::nullopt;
-            }
-            auto card = Card::parseCard(str.substr(pos, 2));
-            if (card.has_value())
-            {
-                return card.value();
-            }
-            return std::nullopt;
-        }
-        inline constexpr CardParseIterator begin() const
-        {
-            return CardParseIterator(str, 0);
-        }
-        inline constexpr CardParseIterator end() const
-        {
-            return CardParseIterator(str, str.size());
-        }
-    };
     inline constexpr Card() = default;
     inline constexpr Card(Suit suit, Rank rank) : m_mask(static_cast<std::uint32_t>(suit) | static_cast<std::uint32_t>(rank << 4)) {}
     inline constexpr Suit getSuit() const
@@ -166,10 +125,6 @@ public:
             cards.push_back(card.value());
         }
         return cards;
-    }
-    static inline constexpr CardParseIterator parseCardRange(const std::string_view str)
-    {
-        return CardParseIterator(str);
     }
 };
 

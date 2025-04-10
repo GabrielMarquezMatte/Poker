@@ -17,7 +17,7 @@ struct ClassificationResult
     }
     inline constexpr bool operator==(const ClassificationResult &other) const
     {
-        return classification == other.classification && rankFlag == rankFlag;
+        return classification == other.classification && rankFlag == other.rankFlag;
     }
     inline constexpr bool operator!=(const ClassificationResult &other) const
     {

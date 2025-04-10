@@ -75,14 +75,14 @@ inline constexpr std::size_t getRankIndex(Rank rank)
 {
     return std::countr_zero(static_cast<uint32_t>(rank));
 }
-inline constexpr std::size_t getSuitIndex(Suit rank)
+inline constexpr std::size_t getSuitIndex(Suit suit)
 {
-    return std::countr_zero(static_cast<uint32_t>(rank));
+    return std::countr_zero(static_cast<uint32_t>(suit));
 }
 
 inline std::ostream &operator<<(std::ostream &os, const Suit suit)
 {
-    static constexpr std::array<std::string_view, 4> suits = {"Diamonds", "Hearts", "Clubs", "Spades"};
+    static constexpr std::array<std::string_view, 4> suits = {"Hearts", "Diamonds", "Clubs", "Spades"};
     return os << suits[getSuitIndex(suit)];
 }
 inline std::ostream &operator<<(std::ostream &os, const Rank rank)
