@@ -58,6 +58,13 @@
         "cinttypes": "cpp",
         "ratio": "cpp",
         "stop_token": "cpp",
-        "thread": "cpp"
+        "thread": "cpp",
+        "chrono": "cpp",
+        "forward_list": "cpp",
+        "iomanip": "cpp",
+        "map": "cpp",
+        "numeric": "cpp",
+        "sstream": "cpp",
+        "xtree": "cpp"
     }
 }

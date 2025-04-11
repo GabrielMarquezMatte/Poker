@@ -3,6 +3,7 @@
 #include <random>
 #include <thread>
 #include <string>
+#include <chrono>
 
 template <std::size_t N>
 bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards)
@@ -125,26 +126,27 @@ inline double runGame(std::span<const Card, 2> playerCardsSpan, std::span<const 
     {
         return 0.0;
     }
+    static constexpr std::size_t simulations = 1'000'000;
     switch (numPlayers)
     {
     case 2:
-        return probabilityOfWinning<2>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<2>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 3:
-        return probabilityOfWinning<3>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<3>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 4:
-        return probabilityOfWinning<4>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<4>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 5:
-        return probabilityOfWinning<5>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<5>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 6:
-        return probabilityOfWinning<6>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<6>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 7:
-        return probabilityOfWinning<7>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<7>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 8:
-        return probabilityOfWinning<8>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<8>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 9:
-        return probabilityOfWinning<9>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<9>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     case 10:
-        return probabilityOfWinning<10>(playerCardsSpan, tableCardsSpan, 100'000, threadCount);
+        return probabilityOfWinning<10>(playerCardsSpan, tableCardsSpan, simulations, threadCount);
     default:
         return 0.0;
     }
