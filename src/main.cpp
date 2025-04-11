@@ -6,7 +6,7 @@
 #include <chrono>
 
 template <std::size_t N>
-bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards)
+bool playerWinsRandomGame(pcg64& rng, const std::span<const Card, 2> playerCards, const std::span<const Card> tableCards)
 {
     Deck deck(rng);
     deck.removeCards(playerCards);
@@ -21,7 +21,7 @@ bool playerWinsRandomGame(pcg64 &rng, const std::span<const Card, 2> playerCards
     std::copy(tableCards.begin(), tableCards.end(), tableCardsCopy.begin());
     std::copy(tableValue.begin(), tableValue.end(), tableCardsCopy.begin() + tableCards.size());
     ClassificationResult mainResult = classifyPlayer(playerCards, tableCardsCopy);
-    if (mainResult.classification == Classification::RoyalFlush)
+    if (mainResult.getClassification() == Classification::RoyalFlush)
     {
         return true;
     }

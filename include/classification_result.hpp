@@ -3,21 +3,42 @@
 #include "card_enums.hpp"
 struct ClassificationResult
 {
-    Classification classification;
-    Rank rankFlag;
+private:
+    std::uint32_t m_mask;
+public:
     inline constexpr ClassificationResult() = default;
-    inline constexpr ClassificationResult(Classification classification, Rank rankFlag) : classification(classification), rankFlag(rankFlag) {}
+    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) : m_mask(static_cast<std::uint32_t>(classification) | static_cast<std::uint32_t>(rankFlag << 9)) {}
+    inline constexpr Classification getClassification() const
+    {
+        return static_cast<Classification>(m_mask & 0x1FF);
+    }
+    inline constexpr Rank getRankFlag() const
+    {
+        return static_cast<Rank>(m_mask >> 9);
+    }
     inline constexpr bool operator<(const ClassificationResult &other) const
     {
-        if (classification != other.classification)
+        Classification classification = getClassification();
+        Classification otherClassification = other.getClassification();
+        if (classification != otherClassification)
         {
-            return static_cast<uint32_t>(classification) < static_cast<uint32_t>(other.classification);
+            return static_cast<uint32_t>(classification) < static_cast<uint32_t>(otherClassification);
         }
-        return static_cast<uint32_t>(rankFlag) < static_cast<uint32_t>(other.rankFlag);
+        Rank rankFlag = getRankFlag();
+        Rank otherRankFlag = other.getRankFlag();
+        return static_cast<uint32_t>(rankFlag) < static_cast<uint32_t>(otherRankFlag);
     }
     inline constexpr bool operator==(const ClassificationResult &other) const
     {
-        return classification == other.classification && rankFlag == other.rankFlag;
+        Classification classification = getClassification();
+        Classification otherClassification = other.getClassification();
+        if (classification != otherClassification)
+        {
+            return false;
+        }
+        Rank rankFlag = getRankFlag();
+        Rank otherRankFlag = other.getRankFlag();
+        return rankFlag == otherRankFlag;
     }
     inline constexpr bool operator!=(const ClassificationResult &other) const
     {
@@ -36,13 +57,10 @@ struct ClassificationResult
         return !(*this < other);
     }
 };
-inline std::ostream &operator<<(std::ostream &os, const ClassificationResult &result)
+inline std::ostream &operator<<(std::ostream &os, const ClassificationResult result)
 {
-    static constexpr std::array<std::string_view, 10> classifications = {"High Card", "Pair", "Two Pair", "Three of a Kind",
-                                                                         "Straight", "Flush", "Full House", "Four of a Kind",
-                                                                         "Straight Flush", "Royal Flush"};
-    os << classifications[static_cast<int>(result.classification)] << ": ";
-    int rankFlag = static_cast<int>(result.rankFlag);
+    os << result.getClassification() << ": ";
+    int rankFlag = static_cast<int>(result.getRankFlag());
     while (rankFlag > 0)
     {
         int rank = std::countr_zero(static_cast<uint32_t>(rankFlag));

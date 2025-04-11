@@ -7,45 +7,56 @@
 struct Hand
 {
 private:
-    static inline constexpr Rank getRanks(const std::span<const Card, 5> cards)
+    static inline constexpr std::tuple<Rank, bool, std::array<int, 13>> processCards(const std::span<const Card, 5> cards)
     {
-        Rank ranks = Rank::Two;
+        Rank rankMask = Rank::Two; // ou 0, dependendo de como o Rank é definido
+        bool flush = true;
+        std::array<int, 13> counts{}; // Inicializa com 0
+        // Assume que o primeiro naipe seja o de referência para verificar flush.
+        auto firstSuit = cards[0].getSuit();
         for (const Card card : cards)
         {
-            ranks = ranks | card.getRank();
+            // Atualiza o bitmask dos ranks (talvez o operador | já esteja definido para Rank).
+            rankMask = rankMask | card.getRank();
+            // Atualiza contagem. Supondo que getRankIndex retorne um índice de 0 a 12.
+            counts[getRankIndex(card.getRank())]++;
+            // Checa se todos os naipes são iguais.
+            if (card.getSuit() != firstSuit)
+            {
+                flush = false;
+            }
         }
-        return ranks;
+        return {rankMask, flush, counts};
     }
-    static inline constexpr std::pair<bool, Rank> getStraight(const std::span<const Card, 5> cards)
+    static inline constexpr std::pair<bool, Rank> getStraight(const Rank rankMask)
     {
+        static constexpr std::array<uint32_t, 9> straightMasks = {0x1Fu << 0, 0x1Fu << 1, 0x1Fu << 2, 0x1Fu << 3,
+                                                                  0x1Fu << 4, 0x1Fu << 5, 0x1Fu << 6, 0x1Fu << 7,
+                                                                  0x1Fu << 8};
         // Special Ace-low case: 2,3,4,5,A
-        Rank cardRanks = getRanks(cards);
-        if (cardRanks == Rank::LowStraight)
+        if (rankMask == Rank::LowStraight)
         {
             return {true, Rank::Five};
         }
         for (int i = 0; i <= 8; ++i)
         {
             // Cria uma máscara com 5 bits consecutivos iniciando em i: (0x1F = 0b11111)
-            uint32_t straightSequence = 0x1Fu << i;
-            if ((static_cast<uint32_t>(cardRanks) & straightSequence) == straightSequence)
+            if ((static_cast<uint32_t>(rankMask) & straightMasks[i]) == straightMasks[i])
             {
                 // O rank mais alto da sequência será i+4.
                 return {true, static_cast<Rank>(1 << (i + 4))};
             }
         }
-        int highestBit = std::bit_width(static_cast<uint32_t>(cardRanks)) - 1;
+        int highestBit = std::bit_width(static_cast<uint32_t>(rankMask)) - 1;
         return {false, static_cast<Rank>(1 << highestBit)};
     }
+
 public:
     static inline constexpr ClassificationResult classify(const std::span<const Card, 5> cards)
     {
-        bool flush = (cards[0].getSuit() == cards[1].getSuit() &&
-                      cards[1].getSuit() == cards[2].getSuit() &&
-                      cards[2].getSuit() == cards[3].getSuit() &&
-                      cards[3].getSuit() == cards[4].getSuit());
+        auto [rankMask, flush, counts] = processCards(cards);
         // Check for a straight.
-        auto [straight, straightHigh] = getStraight(cards);
+        auto [straight, straightHigh] = getStraight(rankMask);
         if (flush && straight)
         {
             // For a royal flush the high card is Ace.
@@ -56,55 +67,51 @@ public:
             return {Classification::StraightFlush, straightHigh};
         }
         // Build a frequency table for ranks.
-        std::array<std::pair<Rank, int>, 13> rankCounts;
-        for (const auto &card : cards)
+        int maxCount = 0;
+        int secondMaxCount = 0;
+        for (int count : counts)
         {
-            std::size_t index = getRankIndex(card.getRank());
-            int count = rankCounts[index].second;
-            if (count == 0)
+            if (count > maxCount)
             {
-                rankCounts[index] = {card.getRank(), 1};
+                secondMaxCount = maxCount;
+                maxCount = count;
                 continue;
             }
-            rankCounts[index].second = count + 1;
+            if (count > secondMaxCount)
+            {
+                secondMaxCount = count;
+            }
         }
-        // Sort by count (descending), then rank (descending).
-        std::sort(rankCounts.begin(), rankCounts.end(), [](const std::pair<Rank, int> &a, const std::pair<Rank, int> &b)
-                  {
-                    if (a.second != b.second)
-                    {
-                        return a.second > b.second;
-                    }
-                    return static_cast<uint32_t>(a.first) > static_cast<uint32_t>(b.first); });
-        if (rankCounts[0].second == 4)
+
+        if (maxCount == 4)
         {
-            return {Classification::FourOfAKind, getRanks(cards)};
+            return {Classification::FourOfAKind, rankMask};
         }
-        if (rankCounts[0].second == 3 && rankCounts[1].second >= 2)
+        if (maxCount == 3 && secondMaxCount >= 2)
         {
-            return {Classification::FullHouse, getRanks(cards)};
+            return {Classification::FullHouse, rankMask};
         }
         if (flush)
         {
-            return {Classification::Flush, getRanks(cards)};
+            return {Classification::Flush, rankMask};
         }
         if (straight)
         {
             return {Classification::Straight, straightHigh};
         }
-        if (rankCounts[0].second == 3)
+        if (maxCount == 3)
         {
-            return {Classification::ThreeOfAKind, getRanks(cards)};
+            return {Classification::ThreeOfAKind, rankMask};
         }
-        if (rankCounts[0].second != 2)
+        if (maxCount != 2)
         {
-            return {Classification::HighCard, getRanks(cards)};
+            return {Classification::HighCard, rankMask};
         }
-        if (rankCounts[1].second == 2)
+        if (secondMaxCount == 2)
         {
-            return {Classification::TwoPair, getRanks(cards)};
+            return {Classification::TwoPair, rankMask};
         }
-        return {Classification::Pair, getRanks(cards)};
+        return {Classification::Pair, rankMask};
     }
 };
 #endif // __POKER_HAND_HPP__

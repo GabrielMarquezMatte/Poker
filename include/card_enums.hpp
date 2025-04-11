@@ -32,16 +32,16 @@ enum class Rank
 };
 enum class Classification
 {
-    HighCard,
-    Pair,
-    TwoPair,
-    ThreeOfAKind,
-    Straight,
-    Flush,
-    FullHouse,
-    FourOfAKind,
-    StraightFlush,
-    RoyalFlush,
+    HighCard = 1 << 0,
+    Pair = 1 << 1,
+    TwoPair = 1 << 2,
+    ThreeOfAKind = 1 << 3,
+    Straight = 1 << 4,
+    Flush = 1 << 5,
+    FullHouse = 1 << 6,
+    FourOfAKind = 1 << 7,
+    StraightFlush = 1 << 8,
+    RoyalFlush = 1 << 9,
 };
 inline constexpr Rank operator|(Rank lhs, Rank rhs)
 {
@@ -79,6 +79,10 @@ inline constexpr std::size_t getSuitIndex(Suit suit)
 {
     return std::countr_zero(static_cast<uint32_t>(suit));
 }
+inline constexpr std::size_t getClassificationIndex(Classification classification)
+{
+    return std::countr_zero(static_cast<uint32_t>(classification));
+}
 
 inline std::ostream &operator<<(std::ostream &os, const Suit suit)
 {
@@ -89,5 +93,12 @@ inline std::ostream &operator<<(std::ostream &os, const Rank rank)
 {
     static constexpr std::array<std::string_view, 13> ranks = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"};
     return os << ranks[getRankIndex(rank)];
+}
+inline std::ostream &operator<<(std::ostream &os, const Classification classification)
+{
+    static constexpr std::array<std::string_view, 10> classifications = {"High Card", "Pair", "Two Pair", "Three of a Kind",
+                                                                           "Straight", "Flush", "Full House", "Four of a Kind",
+                                                                           "Straight Flush", "Royal Flush"};
+    return os << classifications[getClassificationIndex(classification)];
 }
 #endif // __POKER_RANK_HPP__
