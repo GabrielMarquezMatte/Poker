@@ -71,7 +71,7 @@ inline constexpr Rank operator-(Rank lhs, uint32_t rhs)
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) - rhs);
 }
-inline constexpr std::size_t getRankIndex(Rank rank)
+__forceinline constexpr std::size_t getRankIndex(Rank rank)
 {
     return std::countr_zero(static_cast<uint32_t>(rank));
 }

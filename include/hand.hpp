@@ -16,10 +16,11 @@ private:
         auto firstSuit = cards[0].getSuit();
         for (const Card card : cards)
         {
+            Rank cardRank = card.getRank();
             // Atualiza o bitmask dos ranks (talvez o operador | já esteja definido para Rank).
-            rankMask = rankMask | card.getRank();
+            rankMask = rankMask | cardRank;
             // Atualiza contagem. Supondo que getRankIndex retorne um índice de 0 a 12.
-            counts[getRankIndex(card.getRank())]++;
+            counts[getRankIndex(cardRank)]++;
             // Checa se todos os naipes são iguais.
             if (card.getSuit() != firstSuit)
             {
@@ -30,9 +31,9 @@ private:
     }
     static inline constexpr std::pair<bool, Rank> getStraight(const Rank rankMask)
     {
-        static constexpr std::array<uint32_t, 9> straightMasks = {0x1Fu << 0, 0x1Fu << 1, 0x1Fu << 2, 0x1Fu << 3,
-                                                                  0x1Fu << 4, 0x1Fu << 5, 0x1Fu << 6, 0x1Fu << 7,
-                                                                  0x1Fu << 8};
+        constexpr std::array<uint32_t, 9> straightMasks = {0x1Fu << 0, 0x1Fu << 1, 0x1Fu << 2, 0x1Fu << 3,
+                                                           0x1Fu << 4, 0x1Fu << 5, 0x1Fu << 6, 0x1Fu << 7,
+                                                           0x1Fu << 8};
         // Special Ace-low case: 2,3,4,5,A
         if (rankMask == Rank::LowStraight)
         {
