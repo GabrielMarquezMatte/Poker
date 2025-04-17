@@ -4,15 +4,16 @@
 #include <thread>
 #include <string>
 #include <chrono>
+#include <atomic>
 
 template <std::size_t N>
-bool playerWinsRandomGame(pcg64& rng, const Deck playerCards, const Deck tableCards)
+bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, const Deck tableCards)
 {
     Deck deck = Deck::createFullDeck();
     deck.removeCards(playerCards);
     deck.removeCards(tableCards);
     Deck tableDeck = Deck::emptyDeck();
-    for(const Card card : tableCards)
+    for (const Card card : tableCards)
     {
         tableDeck.addCard(card);
     }
@@ -68,31 +69,28 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
 {
     std::vector<std::thread> threads;
     threads.reserve(numThreads);
-    std::vector<std::size_t> wins(numThreads, 0);
+    std::atomic<std::size_t> wins = 0;
     std::size_t simulationsPerThread = numSimulations / numThreads;
     for (std::size_t i = 0; i < numThreads; ++i)
     {
         threads.emplace_back([&, i]()
                              {
             pcg64 threadRng(std::random_device{}());
+            std::size_t threadWins = 0;
             for (std::size_t j = 0; j < simulationsPerThread; ++j)
             {
                 if (playerWinsRandomGame<N>(threadRng, playerCards, tableCards))
                 {
-                    ++wins[i];
+                    ++threadWins;
                 }
-            } });
+            }
+            wins += threadWins; });
     }
     for (auto &thread : threads)
     {
         thread.join();
     }
-    std::size_t totalWins = 0;
-    for (const auto &winCount : wins)
-    {
-        totalWins += winCount;
-    }
-    return static_cast<double>(totalWins) / (simulationsPerThread * numThreads);
+    return static_cast<double>(wins) / (simulationsPerThread * numThreads);
 }
 inline constexpr bool checkUniqueCards(const Deck playerCards, const Deck tableCards)
 {
@@ -133,7 +131,7 @@ inline double runGame(const Deck playerDeck, const Deck tableDeck, std::size_t n
     }
 }
 
-int main(int argc, const char** argv)
+int main(int argc, const char **argv)
 {
     if (argc < 4)
     {
