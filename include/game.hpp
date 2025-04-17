@@ -2,11 +2,10 @@
 #define __POKER_GAME_HPP__
 #include "classification_result.hpp"
 #include "hand.hpp"
-inline constexpr ClassificationResult classifyPlayer(const std::span<const Card, 2> playerCards, const std::span<const Card, 5> tableCards)
+#include "deck.hpp"
+inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, const Deck tableCards)
 {
-    std::array<Card, 7> cards;
-    std::copy(tableCards.begin(), tableCards.end(), cards.begin());
-    std::copy(playerCards.begin(), playerCards.end(), cards.begin() + 5);
+    Deck allCards = Deck::createDeck({playerCards, tableCards});
     ClassificationResult best = {Classification::HighCard, Rank::Two};
     for (std::size_t i = 0; i < 7; ++i)
     {
@@ -18,7 +17,12 @@ inline constexpr ClassificationResult classifyPlayer(const std::span<const Card,
             {
                 if (l != i && l != j)
                 {
-                    hand[k++] = cards[l];
+                    auto cardDealt = allCards.at(l);
+                    if (!cardDealt.has_value())
+                    {
+                        return {Classification::HighCard, Rank::Two};
+                    }
+                    hand[k++] = cardDealt.value();
                 }
             }
             ClassificationResult candidate = Hand::classify(hand);

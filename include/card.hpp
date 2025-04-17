@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 #include <ostream>
+#include "deck.hpp"
 #include "card_enums.hpp"
 struct Card
 {
@@ -101,30 +102,6 @@ public:
             return std::nullopt;
         }
         return Card(*suit, *rank);
-    }
-    static inline std::vector<Card> parseHand(const std::string_view str)
-    {
-        // Split from spaces
-        std::vector<Card> cards;
-        cards.reserve(5);
-        std::size_t start = 0;
-        std::size_t end = str.find(' ', start);
-        while (end != std::string_view::npos)
-        {
-            auto card = parseCard(str.substr(start, end - start));
-            if (card.has_value())
-            {
-                cards.push_back(card.value());
-            }
-            start = end + 1;
-            end = str.find(' ', start);
-        }
-        auto card = parseCard(str.substr(start, end - start));
-        if (card.has_value())
-        {
-            cards.push_back(card.value());
-        }
-        return cards;
     }
 };
 

@@ -3,85 +3,158 @@
 #include <array>
 #include <span>
 #include <pcg_random.hpp>
+#include <random>
 #include "card.hpp"
 struct Deck
 {
 private:
-    std::array<Card, 52> m_cards;
-    std::size_t m_deckSize = 52;
-    inline void createAndShuffleDeck(pcg64 &rng)
+    std::int64_t m_cardsBitmask;
+    static inline constexpr std::uint64_t calculateCardMask(const Card card)
     {
-        for (int i = 0; i < 4; ++i)
-        {
-            for (int j = 0; j < 13; ++j)
-            {
-                m_cards[i * 13 + j] = {static_cast<Suit>(1 << i), static_cast<Rank>(1 << j)};
-            }
-        }
-        std::shuffle(m_cards.begin(), m_cards.end(), rng);
+        std::size_t rankIndex = getRankIndex(card.getRank());
+        std::size_t suitIndex = getSuitIndex(card.getSuit());
+        return (1ULL << (rankIndex + (suitIndex * 13)));
     }
+    static inline constexpr Card calculateCardFromMask(const std::uint64_t mask)
+    {
+        int count = std::countr_zero(mask);
+        std::int64_t rankIndex = count % 13;
+        std::int64_t suitIndex = count / 13;
+        return Card(static_cast<Suit>(1 << suitIndex), static_cast<Rank>(1 << rankIndex));
+    }
+
 public:
-    Deck(pcg64 &rng)
+    struct DeckIterator
     {
-        createAndShuffleDeck(rng);
-    }
-    Deck(Deck &&) = default;
-    Deck &operator=(Deck &&) = default;
-    Deck(const Deck &) = delete;
-    Deck &operator=(const Deck &) = delete;
-    inline constexpr std::span<const Card> cards() const
-    {
-        return std::span<const Card>(m_cards.data(), m_deckSize);
-    }
-    // Deal the next 2 cards (without reshuffling).
-    inline std::optional<std::span<const Card, 2>> dealToPlayer()
-    {
-        if (m_deckSize < 2)
+        std::int64_t m_mask;
+        inline constexpr DeckIterator(std::int64_t mask) : m_mask(mask) {}
+        inline constexpr bool operator!=(const DeckIterator &other) const
         {
-            return std::nullopt;
+            return m_mask != other.m_mask;
         }
-        m_deckSize -= 2;
-        return std::span<const Card, 2>{m_cards.data() + (52 - m_deckSize - 2), 2};
-    }
-    // Deal the next 5 cards (without reshuffling).
-    inline std::optional<std::span<const Card, 5>> dealToTable()
-    {
-        if (m_deckSize < 5)
+        inline constexpr Card operator*() const
         {
-            return std::nullopt;
+            return calculateCardFromMask(m_mask & -m_mask);
         }
-        m_deckSize -= 5;
-        return std::span<const Card, 5>{m_cards.data() + (52 - m_deckSize - 5), 5};
-    }
-    template <std::size_t N>
-    inline std::optional<std::span<const Card, N>> dealCards()
-    {
-        if (m_deckSize < N)
+        inline constexpr DeckIterator &operator++()
         {
-            return std::nullopt;
+            m_mask &= ~(m_mask & -m_mask);
+            return *this;
         }
-        m_deckSize -= N;
-        return std::span<const Card, N>{m_cards.data() + (52 - m_deckSize - N), N};
-    }
-    inline std::optional<std::span<const Card>> dealCards(std::size_t numCards)
+    };
+    static inline constexpr Deck createFullDeck()
     {
-        if (m_deckSize < numCards)
+        Deck deck;
+        deck.m_cardsBitmask = 0xFFFFFFFFFFFFF;
+        return deck;
+    }
+    static inline constexpr Deck emptyDeck()
+    {
+        Deck deck;
+        deck.m_cardsBitmask = 0;
+        return deck;
+    }
+    static inline constexpr Deck createDeck(const std::initializer_list<Deck> decks)
+    {
+        Deck deck = Deck::emptyDeck();
+        for (const Deck d : decks)
         {
-            return std::nullopt;
+            deck.m_cardsBitmask |= d.m_cardsBitmask;
         }
-        m_deckSize -= numCards;
-        return std::span<const Card>{m_cards.data() + (52 - m_deckSize - numCards), numCards};
+        return deck;
     }
-    inline constexpr void removeCards(const std::span<const Card> cardsToRemove)
+    static inline constexpr Deck parseHand(const std::string_view str)
     {
-        for (const auto &card : cardsToRemove)
+        // Split from spaces
+        Deck deck = Deck::emptyDeck();
+        std::size_t start = 0;
+        std::size_t end = str.find(' ', start);
+        while (end != std::string_view::npos)
         {
-            auto it = std::find(m_cards.begin(), m_cards.end(), card);
-            if (it != m_cards.end())
+            auto card = Card::parseCard(str.substr(start, end - start));
+            if (card.has_value())
             {
-                *it = m_cards[--m_deckSize];
+                deck.addCard(card.value());
             }
+            start = end + 1;
+            end = str.find(' ', start);
         }
+        auto card = Card::parseCard(str.substr(start, end - start));
+        if (card.has_value())
+        {
+            deck.addCard(card.value());
+        }
+        return deck;
+    }
+    inline constexpr std::int64_t getMask() const
+    {
+        return m_cardsBitmask;
+    }
+    inline constexpr void addCard(const Card card)
+    {
+        m_cardsBitmask |= calculateCardMask(card);
+    }
+    inline constexpr void removeCards(const Deck deck)
+    {
+        m_cardsBitmask &= ~deck.m_cardsBitmask;
+    }
+    inline std::optional<Card> popRandomCard(pcg64 &rng)
+    {
+        if (m_cardsBitmask == 0)
+        {
+            return std::nullopt;
+        }
+        std::int64_t tmp = m_cardsBitmask;
+        std::int64_t bit = 0;
+        std::uniform_int_distribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
+        size_t idx = dist(rng);
+        for (size_t i = 0; i <= idx; ++i)
+        {
+            bit = tmp & -tmp;
+            tmp ^= bit;
+        }
+        m_cardsBitmask &= ~bit;
+        return calculateCardFromMask(bit);
+    }
+    inline constexpr std::optional<Card> dealCard(std::size_t index) const
+    {
+        if (index >= 52)
+        {
+            return std::nullopt;
+        }
+        std::int64_t mask = 1ULL << index;
+        if ((m_cardsBitmask & mask) == 0)
+        {
+            return std::nullopt;
+        }
+        return calculateCardFromMask(mask);
+    }
+    inline constexpr std::optional<Card> at(std::size_t index) const
+    {
+        if (index >= size())
+        {
+            return std::nullopt;
+        }
+        std::size_t count = 0;
+        std::int64_t mask = m_cardsBitmask;
+        while (count < index)
+        {
+            mask &= ~(mask & -mask);
+            ++count;
+        }
+        return calculateCardFromMask(mask & -mask);
+    }
+    inline constexpr std::size_t size() const
+    {
+        return std::popcount(static_cast<std::uint64_t>(m_cardsBitmask));
+    }
+    inline constexpr DeckIterator begin() const
+    {
+        return DeckIterator(m_cardsBitmask);
+    }
+    inline constexpr DeckIterator end() const
+    {
+        return DeckIterator(0);
     }
 };
 #endif // __POKER_DECK_HPP__
