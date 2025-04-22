@@ -4,6 +4,7 @@
 #include <span>
 #include <pcg_random.hpp>
 #include <random>
+#include <immintrin.h>
 #include "card.hpp"
 struct Deck
 {
@@ -98,36 +99,13 @@ public:
     {
         m_cardsBitmask &= ~deck.m_cardsBitmask;
     }
-    inline std::optional<Card> popRandomCard(pcg64 &rng)
+    inline Card popRandomCard(pcg64 &rng)
     {
-        if (m_cardsBitmask == 0)
-        {
-            return std::nullopt;
-        }
         std::int64_t tmp = m_cardsBitmask;
-        std::int64_t bit = 0;
         std::uniform_int_distribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
-        size_t idx = dist(rng);
-        for (size_t i = 0; i <= idx; ++i)
-        {
-            bit = tmp & -tmp;
-            tmp ^= bit;
-        }
+        std::uint64_t bit = _pdep_u64(1ULL << dist(rng), tmp);
         m_cardsBitmask &= ~bit;
         return calculateCardFromMask(bit);
-    }
-    inline constexpr std::optional<Card> dealCard(std::size_t index) const
-    {
-        if (index >= 52)
-        {
-            return std::nullopt;
-        }
-        std::int64_t mask = 1ULL << index;
-        if ((m_cardsBitmask & mask) == 0)
-        {
-            return std::nullopt;
-        }
-        return calculateCardFromMask(mask);
     }
     inline constexpr std::optional<Card> at(std::size_t index) const
     {
