@@ -4,7 +4,6 @@
 #include <string_view>
 #include <vector>
 #include <ostream>
-#include "deck.hpp"
 #include "card_enums.hpp"
 struct Card
 {

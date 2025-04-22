@@ -11,8 +11,7 @@ inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, con
     {
         for (std::size_t j = i + 1; j < 7; ++j)
         {
-            std::array<Card, 5> hand;
-            std::size_t k = 0;
+            Deck hand = Deck::emptyDeck();
             for (std::size_t l = 0; l < 7; ++l)
             {
                 if (l != i && l != j)
@@ -22,7 +21,7 @@ inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, con
                     {
                         return {Classification::HighCard, Rank::Two};
                     }
-                    hand[k++] = cardDealt.value();
+                    hand.addCard(cardDealt.value());
                 }
             }
             ClassificationResult candidate = Hand::classify(hand);

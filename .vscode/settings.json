@@ -66,6 +66,7 @@
         "numeric": "cpp",
         "sstream": "cpp",
         "xtree": "cpp",
-        "ranges": "cpp"
+        "ranges": "cpp",
+        "string_view": "cpp"
     }
 }

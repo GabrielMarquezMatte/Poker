@@ -113,14 +113,9 @@ public:
         {
             return std::nullopt;
         }
-        std::size_t count = 0;
-        std::int64_t mask = m_cardsBitmask;
-        while (count < index)
-        {
-            mask &= ~(mask & -mask);
-            ++count;
-        }
-        return calculateCardFromMask(mask & -mask);
+        std::int64_t tmp = m_cardsBitmask;
+        std::uint64_t bit = _pdep_u64(1ULL << index, tmp);
+        return calculateCardFromMask(bit);
     }
     inline constexpr std::size_t size() const
     {
