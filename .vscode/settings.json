@@ -67,6 +67,19 @@
         "sstream": "cpp",
         "xtree": "cpp",
         "ranges": "cpp",
-        "string_view": "cpp"
+        "string_view": "cpp",
+        "any": "cpp",
+        "condition_variable": "cpp",
+        "csignal": "cpp",
+        "deque": "cpp",
+        "fstream": "cpp",
+        "functional": "cpp",
+        "list": "cpp",
+        "mutex": "cpp",
+        "set": "cpp",
+        "unordered_map": "cpp",
+        "unordered_set": "cpp",
+        "variant": "cpp",
+        "xhash": "cpp"
     }
 }

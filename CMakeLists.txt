@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30.0)
-project(SudokuSolver VERSION 0.1.0 LANGUAGES C CXX)
+project(Poker VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,5 +19,6 @@ endif()
 
 include(${PROJECT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake)
 find_path(PCG_INCLUDE_DIRS "pcg_extras.hpp")
+add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 add_executable(${PROJECT_NAME} src/main.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${PCG_INCLUDE_DIRS})

@@ -1,0 +1,5 @@
+enable_testing()
+find_package(GTest CONFIG REQUIRED)
+add_executable(PokerTest poker_tests.cpp)
+target_link_libraries(PokerTest GTest::gtest GTest::gtest_main)
+add_test(NAME PokerTest COMMAND PokerTest)

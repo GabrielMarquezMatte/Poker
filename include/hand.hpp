@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "card.hpp"
 #include "deck.hpp"
+#include "classification_result.hpp"
 struct Hand
 {
 private:
@@ -29,22 +30,16 @@ private:
         }
         return counts;
     }
-    static inline constexpr std::pair<bool, Rank> getStraight(const Rank rankMask)
+    static inline constexpr bool isStraight(const Rank rankMask)
     {
         // Special Ace-low case: 2,3,4,5,A
         if (rankMask == Rank::LowStraight)
         {
-            return {true, Rank::Five};
+            return true;
         }
         std::uint32_t m = static_cast<std::uint32_t>(rankMask);
         std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
-        if (run5 != 0)
-        {
-            int highCard = std::bit_width(run5) - 1;
-            return {true, static_cast<Rank>(Rank::Two << (highCard + 4))};
-        }
-        int highCard = std::bit_width(m) - 1;
-        return {false, static_cast<Rank>(Rank::Two << highCard)};
+        return run5 != 0;
     }
 
 public:
@@ -55,17 +50,16 @@ public:
         splitSuits(deckMask, s0, s1, s2, s3);
         std::uint32_t rankMask = s0 | s1 | s2 | s3;
         bool flush = (std::popcount(s0) >= cards.size()) || (std::popcount(s1) >= cards.size()) || (std::popcount(s2) >= cards.size()) || (std::popcount(s3) >= cards.size());
-        auto [straight, highCard] = getStraight(static_cast<Rank>(rankMask));
+        Rank rankValue = static_cast<Rank>(rankMask);
+        bool straight = isStraight(rankValue);
         if (straight && flush)
         {
-            if (highCard == Rank::Ace)
+            if (rankValue == Rank::HighStraight)
             {
                 return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
             }
-            return {Classification::StraightFlush, highCard};
+            return {Classification::StraightFlush, rankValue};
         }
-        // Build a frequency table for ranks.
-        Rank rankValue = static_cast<Rank>(rankMask);
         std::array<int, 13> counts = processCards(cards);
         int maxCount = 0;
         int secondMaxCount = 0;
@@ -96,7 +90,7 @@ public:
         }
         if (straight)
         {
-            return {Classification::Straight, highCard};
+            return {Classification::Straight, rankValue};
         }
         if (maxCount == 3)
         {

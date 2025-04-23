@@ -10,6 +10,19 @@ struct Deck
 {
 private:
     std::int64_t m_cardsBitmask;
+    static constexpr std::array<Card, 52> m_deck = []()
+    {
+        std::array<Card, 52> deck;
+        std::size_t index = 0;
+        for (int suit = 0; suit < 4; ++suit)
+        {
+            for (int rank = 0; rank < 13; ++rank)
+            {
+                deck[index++] = Card(static_cast<Suit>(1 << suit), static_cast<Rank>(1 << rank));
+            }
+        }
+        return deck;
+    }();
     static inline constexpr std::uint64_t calculateCardMask(const Card card)
     {
         std::size_t rankIndex = getRankIndex(card.getRank());
@@ -19,9 +32,7 @@ private:
     static inline constexpr Card calculateCardFromMask(const std::uint64_t mask)
     {
         int count = std::countr_zero(mask);
-        std::int64_t rankIndex = count % 13;
-        std::int64_t suitIndex = count / 13;
-        return Card(static_cast<Suit>(1 << suitIndex), static_cast<Rank>(1 << rankIndex));
+        return m_deck[count];
     }
 
 public:
@@ -61,6 +72,15 @@ public:
         for (const Deck d : decks)
         {
             deck.m_cardsBitmask |= d.m_cardsBitmask;
+        }
+        return deck;
+    }
+    static inline constexpr Deck createDeck(const std::initializer_list<Card> cards)
+    {
+        Deck deck = Deck::emptyDeck();
+        for (const Card card : cards)
+        {
+            deck.addCard(card);
         }
         return deck;
     }
@@ -113,7 +133,7 @@ public:
         {
             return std::nullopt;
         }
-        std::int64_t tmp = m_cardsBitmask;
+        std::uint64_t tmp = m_cardsBitmask;
         std::uint64_t bit = _pdep_u64(1ULL << index, tmp);
         return calculateCardFromMask(bit);
     }
