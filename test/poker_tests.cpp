@@ -6,13 +6,12 @@
 
 TEST(DeckTest, ParsingHand)
 {
-    static constexpr std::optional<Deck> parsedDeck = Deck::parseHand("2H 3D 4S 5C 6H");
+    static constexpr Deck parsedDeck = Deck::parseHand("2H 3D 4S 5C 6H");
     static constexpr Deck expectedDeck = Deck::createDeck({Card(Suit::Hearts, Rank::Two), Card(Suit::Diamonds, Rank::Three),
                                                            Card(Suit::Spades, Rank::Four), Card(Suit::Clubs, Rank::Five),
                                                            Card(Suit::Hearts, Rank::Six)});
-    static_assert(parsedDeck.has_value(), "Expected valid deck from parsing hand string");
-    static_assert(parsedDeck->size() == 5, "Expected deck size of 5 after parsing");
-    static_assert(parsedDeck->getMask() == expectedDeck.getMask(), "Parsed deck does not match expected deck");
+    static_assert(parsedDeck.size() == 5, "Expected deck size of 5 after parsing");
+    static_assert(parsedDeck.getMask() == expectedDeck.getMask(), "Parsed deck does not match expected deck");
 }
 TEST(DeckTest, ClassifyRoyalFlush)
 {
@@ -43,7 +42,7 @@ TEST(DeckTest, ClassifyStraight)
                                                    Card(Suit::Hearts, Rank::Jack),
                                                    Card(Suit::Diamonds, Rank::Ten)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::Straight, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten), "Expected Flush classification");
+    static_assert(result == ClassificationResult(Classification::Straight, Rank::Ace), "Expected Flush classification");
 }
 TEST(DeckTest, ClassifyFlush)
 {
@@ -151,13 +150,8 @@ TEST(ClassificationTest, ClassifyWheelStraight)
                                                    Card(Suit::Diamonds, Rank::Three),
                                                    Card(Suit::Spades, Rank::Two),
                                                    Card(Suit::Clubs, Rank::Ace)});
-    static constexpr ClassificationResult result =
-        Hand::classify(deck);
-    static_assert(
-        result == ClassificationResult(
-                      Classification::Straight,
-                      Rank::LowStraight),
-        "Expected Low-Ace Straight");
+    static constexpr ClassificationResult result = Hand::classify(deck);
+    static_assert(result == ClassificationResult(Classification::Straight, Rank::Five), "Expected Low-Ace Straight");
 }
 
 TEST(ClassificationTest, ClassifyWheelStraightFlush)
@@ -252,4 +246,39 @@ TEST(GameTest, CheckUniqueCards)
     };
     static_assert(checkUniqueCards(p, t1) == false, "Expected duplicate cards in hand and table");
     static_assert(checkUniqueCards(p, t2) == true, "Expected no duplicate cards in hand and table");
+}
+
+TEST(DeckTest, RemoveAndAddCards) {
+    static constexpr Deck full = Deck::createFullDeck();
+    static_assert(full.size() == 52, "Expected full deck size of 52");
+    static constexpr Deck firstTestDeck = [] {
+        Deck deck = Deck::createFullDeck();
+        deck.removeCard(Card(Suit::Spades, Rank::Ten));
+        return deck;
+    }();
+    static_assert(firstTestDeck.size() == 51, "Expected deck size of 51 after removing one card");
+    static constexpr Deck secondTestDeck = [] {
+        Deck deck = Deck::createFullDeck();
+        deck.removeCard(Card(Suit::Spades, Rank::Ten));
+        deck.removeCard(Card(Suit::Clubs, Rank::Five));
+        return deck;
+    }();
+    static_assert(secondTestDeck.size() == 50, "Expected deck size of 50 after removing two cards");
+    static constexpr Deck thirdTestDeck = [] {
+        Deck deck = Deck::createFullDeck();
+        deck.removeCard(Card(Suit::Spades, Rank::Ten));
+        deck.removeCard(Card(Suit::Clubs, Rank::Five));
+        deck.addCard(Card(Suit::Spades, Rank::Ten));
+        return deck;
+    }();
+    static_assert(thirdTestDeck.size() == 51, "Expected deck size of 51 after removing two cards and adding one card");
+    static constexpr Deck fourthTestDeck = [] {
+        Deck deck = Deck::createFullDeck();
+        deck.removeCard(Card(Suit::Spades, Rank::Ten));
+        deck.removeCard(Card(Suit::Clubs, Rank::Five));
+        deck.addCard(Card(Suit::Spades, Rank::Ten));
+        deck.addCard(Card(Suit::Clubs, Rank::Five));
+        return deck;
+    }();
+    static_assert(fourthTestDeck.size() == 52, "Expected deck size of 52 after removing two cards and adding two cards");
 }

@@ -9,14 +9,15 @@
 struct Hand
 {
 private:
-    static inline constexpr void splitSuits(std::uint64_t deckMask,
-                                            std::uint32_t &s0, std::uint32_t &s1,
-                                            std::uint32_t &s2, std::uint32_t &s3) noexcept
+    static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
-        s0 = static_cast<std::uint32_t>(deckMask & 0x1FFFu);
-        s1 = static_cast<std::uint32_t>((deckMask >> 13) & 0x1FFFu);
-        s2 = static_cast<std::uint32_t>((deckMask >> 26) & 0x1FFFu);
-        s3 = static_cast<std::uint32_t>((deckMask >> 39) & 0x1FFFu);
+        std::uint32_t s0 = static_cast<std::uint32_t>(deckMask & 0x1FFFu);
+        std::uint32_t s1 = static_cast<std::uint32_t>((deckMask >> 13) & 0x1FFFu);
+        std::uint32_t s2 = static_cast<std::uint32_t>((deckMask >> 26) & 0x1FFFu);
+        std::uint32_t s3 = static_cast<std::uint32_t>((deckMask >> 39) & 0x1FFFu);
+        std::uint32_t flushMask = s0 | s1 | s2 | s3;
+        bool flush = (std::popcount(s0) >= 5) || (std::popcount(s1) >= 5) || (std::popcount(s2) >= 5) || (std::popcount(s3) >= 5);
+        return {flush, static_cast<Rank>(flushMask)};
     }
     static inline constexpr std::array<int, 13> processCards(const Deck cards)
     {
@@ -52,11 +53,7 @@ public:
     static inline constexpr ClassificationResult classify(const Deck cards)
     {
         std::uint64_t deckMask = cards.getMask();
-        std::uint32_t s0, s1, s2, s3;
-        splitSuits(deckMask, s0, s1, s2, s3);
-        std::uint32_t rankMask = s0 | s1 | s2 | s3;
-        bool flush = (std::popcount(s0) >= cards.size()) || (std::popcount(s1) >= cards.size()) || (std::popcount(s2) >= cards.size()) || (std::popcount(s3) >= cards.size());
-        Rank rankValue = static_cast<Rank>(rankMask);
+        auto [flush, rankValue] = getFlush(deckMask);
         auto [straight, highRank] = getStraight(rankValue);
         if (straight && flush)
         {
@@ -96,7 +93,7 @@ public:
         }
         if (straight)
         {
-            return {Classification::Straight, rankValue};
+            return {Classification::Straight, highRank};
         }
         if (maxCount == 3)
         {

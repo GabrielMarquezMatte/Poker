@@ -41,15 +41,16 @@ private:
         {
             return _pdep_u64(x, mask);
         }
-        std::uint64_t result = 0;
-        for (std::size_t i = 0; i < 64; ++i)
+        std::uint64_t res = 0;
+        // for each 1-bit in mask, deposit the next low bit from src
+        for (std::uint64_t m = mask; m; m &= m - 1)
         {
-            if (mask & (1ULL << i))
-            {
-                result |= (x & (1ULL << i)) ? (1ULL << i) : 0;
-            }
+            std::uint64_t lowest = m & -static_cast<std::int64_t>(m); // extract lowest set bit of mask
+            if (x & 1)                   // if low bit of src is 1
+                res |= lowest;             // set that position
+            x >>= 1;                     // consume one bit of src
         }
-        return result;
+        return res;
     }
 
 public:
@@ -135,6 +136,10 @@ public:
     inline constexpr void removeCards(const Deck deck)
     {
         m_cardsBitmask &= ~deck.m_cardsBitmask;
+    }
+    inline constexpr void removeCard(const Card card)
+    {
+        m_cardsBitmask &= ~calculateCardMask(card);
     }
     inline Card popRandomCard(pcg64 &rng)
     {
