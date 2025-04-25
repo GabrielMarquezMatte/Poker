@@ -35,6 +35,23 @@ private:
         return m_deck[count];
     }
 
+    static inline constexpr std::uint64_t pdep(std::uint64_t x, std::uint64_t mask)
+    {
+        if (!std::is_constant_evaluated())
+        {
+            return _pdep_u64(x, mask);
+        }
+        std::uint64_t result = 0;
+        for (std::size_t i = 0; i < 64; ++i)
+        {
+            if (mask & (1ULL << i))
+            {
+                result |= (x & (1ULL << i)) ? (1ULL << i) : 0;
+            }
+        }
+        return result;
+    }
+
 public:
     struct DeckIterator
     {
@@ -123,7 +140,7 @@ public:
     {
         std::int64_t tmp = m_cardsBitmask;
         std::uniform_int_distribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
-        std::uint64_t bit = _pdep_u64(1ULL << dist(rng), tmp);
+        std::uint64_t bit = pdep(1ULL << dist(rng), tmp);
         m_cardsBitmask &= ~bit;
         return calculateCardFromMask(bit);
     }
@@ -134,7 +151,7 @@ public:
             return std::nullopt;
         }
         std::uint64_t tmp = m_cardsBitmask;
-        std::uint64_t bit = _pdep_u64(1ULL << index, tmp);
+        std::uint64_t bit = pdep(1ULL << index, tmp);
         return calculateCardFromMask(bit);
     }
     inline constexpr std::size_t size() const

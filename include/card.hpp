@@ -2,7 +2,6 @@
 #define __POKER_CARD_HPP__
 #include <optional>
 #include <string_view>
-#include <vector>
 #include <ostream>
 #include "card_enums.hpp"
 struct Card

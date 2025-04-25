@@ -7,14 +7,14 @@ private:
     std::uint32_t m_mask;
 public:
     inline constexpr ClassificationResult() = default;
-    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) : m_mask(static_cast<std::uint32_t>(classification) | static_cast<std::uint32_t>(rankFlag << 9)) {}
+    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) : m_mask(static_cast<std::uint32_t>(classification) | static_cast<std::uint32_t>(rankFlag << 10)) {}
     inline constexpr Classification getClassification() const
     {
-        return static_cast<Classification>(m_mask & 0x1FF);
+        return static_cast<Classification>(m_mask & 0x3FF);
     }
     inline constexpr Rank getRankFlag() const
     {
-        return static_cast<Rank>(m_mask >> 9);
+        return static_cast<Rank>(m_mask >> 10);
     }
     inline constexpr bool operator<(const ClassificationResult &other) const
     {
@@ -22,23 +22,13 @@ public:
         Classification otherClassification = other.getClassification();
         if (classification != otherClassification)
         {
-            return static_cast<uint32_t>(classification) < static_cast<uint32_t>(otherClassification);
+            return classification < otherClassification;
         }
-        Rank rankFlag = getRankFlag();
-        Rank otherRankFlag = other.getRankFlag();
-        return static_cast<uint32_t>(rankFlag) < static_cast<uint32_t>(otherRankFlag);
+        return getRankFlag() < other.getRankFlag();
     }
     inline constexpr bool operator==(const ClassificationResult &other) const
     {
-        Classification classification = getClassification();
-        Classification otherClassification = other.getClassification();
-        if (classification != otherClassification)
-        {
-            return false;
-        }
-        Rank rankFlag = getRankFlag();
-        Rank otherRankFlag = other.getRankFlag();
-        return rankFlag == otherRankFlag;
+        return getClassification() == other.getClassification() && getRankFlag() == other.getRankFlag();
     }
     inline constexpr bool operator!=(const ClassificationResult &other) const
     {
@@ -65,7 +55,11 @@ inline std::ostream &operator<<(std::ostream &os, const ClassificationResult res
     {
         int rank = std::countr_zero(static_cast<uint32_t>(rankFlag));
         rankFlag &= ~(1 << rank);
-        os << static_cast<Rank>(rank) << " ";
+        os << static_cast<Rank>(1 << rank);
+        if (rankFlag > 0)
+        {
+            os << " ";
+        }
     }
     return os;
 }

@@ -30,16 +30,22 @@ private:
         }
         return counts;
     }
-    static inline constexpr bool isStraight(const Rank rankMask)
+    static inline constexpr std::pair<bool, Rank> getStraight(const Rank rankMask)
     {
         // Special Ace-low case: 2,3,4,5,A
         if (rankMask == Rank::LowStraight)
         {
-            return true;
+            return {true, Rank::Five};
         }
         std::uint32_t m = static_cast<std::uint32_t>(rankMask);
         std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
-        return run5 != 0;
+        if (run5 != 0)
+        {
+            int highCard = std::bit_width(run5) - 1;
+            return {true, static_cast<Rank>(Rank::Two << (highCard + 4))};
+        }
+        int highCard = std::bit_width(m) - 1;
+        return {false, static_cast<Rank>(Rank::Two << highCard)};
     }
 
 public:
@@ -51,14 +57,14 @@ public:
         std::uint32_t rankMask = s0 | s1 | s2 | s3;
         bool flush = (std::popcount(s0) >= cards.size()) || (std::popcount(s1) >= cards.size()) || (std::popcount(s2) >= cards.size()) || (std::popcount(s3) >= cards.size());
         Rank rankValue = static_cast<Rank>(rankMask);
-        bool straight = isStraight(rankValue);
+        auto [straight, highRank] = getStraight(rankValue);
         if (straight && flush)
         {
             if (rankValue == Rank::HighStraight)
             {
                 return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
             }
-            return {Classification::StraightFlush, rankValue};
+            return {Classification::StraightFlush, highRank};
         }
         std::array<int, 13> counts = processCards(cards);
         int maxCount = 0;

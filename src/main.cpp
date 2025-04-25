@@ -5,34 +5,38 @@
 #include <string>
 #include <chrono>
 #include <atomic>
+#include <charconv>
 
-bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, const Deck tableCards, std::size_t numPlayers)
+bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
 {
     Deck deck = Deck::createFullDeck();
     deck.removeCards(playerCards);
     deck.removeCards(tableCards);
-    Deck tableDeck = Deck::emptyDeck();
-    for (const Card card : tableCards)
+    std::size_t numCardsToDeal = 5 - tableCards.size();
+    for (std::size_t i = 0; i < numCardsToDeal; ++i)
     {
-        tableDeck.addCard(card);
+        tableCards.addCard(deck.popRandomCard(rng));
     }
-    for (std::size_t i = 0; i < 5 - tableCards.size(); ++i)
+    ClassificationResult mainResult = classifyPlayer(playerCards, tableCards);
+    Classification mainClassification = mainResult.getClassification();
+    switch (mainClassification)
     {
-        tableDeck.addCard(deck.popRandomCard(rng));
-    }
-    ClassificationResult mainResult = classifyPlayer(playerCards, tableDeck);
-    if (mainResult.getClassification() == Classification::RoyalFlush)
-    {
+    case Classification::RoyalFlush:
+    case Classification::StraightFlush:
         return true;
+    default:
+        break;
+    }
+    ClassificationResult boardResult = classifyPlayer(Deck::emptyDeck(), tableCards);
+    if (boardResult.getClassification() >= mainClassification && boardResult.getRankFlag() == mainResult.getRankFlag())
+    {
+        return false;
     }
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
-        Deck opponentDeck = Deck::emptyDeck();
-        for (std::size_t j = 0; j < 2; ++j)
-        {
-            opponentDeck.addCard(deck.popRandomCard(rng));
-        }
-        ClassificationResult playerResult = classifyPlayer(opponentDeck, tableDeck);
+        Card opponentCard1 = deck.popRandomCard(rng);
+        Card opponentCard2 = deck.popRandomCard(rng);
+        ClassificationResult playerResult = classifyPlayer(Deck::createDeck({opponentCard1, opponentCard2}), tableCards);
         if (playerResult > mainResult)
         {
             return false;
@@ -86,45 +90,78 @@ inline constexpr bool checkUniqueCards(const Deck playerCards, const Deck tableC
     return (playerMask & tableMask) == 0;
 }
 
-int main(int argc, const char **argv)
+bool getParameters(int argc, const char **argv, Deck &playerCards, Deck &tableCards, std::size_t &numPlayers, std::size_t &numSimulations)
 {
     if (argc < 4)
     {
-        std::cerr << "Usage: " << argv[0] << " <hand> <table> <num_players>\n";
-        return 1;
+        std::cerr << "Usage: " << argv[0] << " <hand> <table> <num_players> [num_simulations]\n";
+        return false;
     }
     std::string_view playerHand = argv[1];
-    std::optional<Deck> playerCards = Deck::parseHand(playerHand);
-    if (!playerCards.has_value() || playerCards->size() != 2)
+    std::optional<Deck> playerCardsOpt = Deck::parseHand(playerHand);
+    if (!playerCardsOpt.has_value() || playerCardsOpt->size() != 2)
     {
         std::cerr << "Invalid hand: " << playerHand << '\n';
-        return 1;
+        return false;
     }
-    Deck playerDeck = *playerCards;
+    playerCards = *playerCardsOpt;
     std::string_view tableCardsStr = argv[2];
-    std::optional<Deck> tableCards = Deck::parseHand(tableCardsStr);
-    if (!tableCards.has_value() || tableCards->size() > 5)
+    std::optional<Deck> tableCardsOpt = Deck::parseHand(tableCardsStr);
+    if (!tableCardsOpt.has_value() || tableCardsOpt->size() > 5)
     {
         std::cerr << "Invalid table cards: " << tableCardsStr << '\n';
-        return 1;
+        return false;
     }
-    Deck tableDeck = *tableCards;
-    if (!checkUniqueCards(playerDeck, tableDeck))
+    tableCards = *tableCardsOpt;
+    if (!checkUniqueCards(playerCards, tableCards))
     {
         std::cerr << "Duplicate cards found in hand or table.\n";
-        return 1;
+        return false;
     }
-    std::cout << "Player cards: " << *playerDeck.at(0) << ", " << *playerDeck.at(1) << '\n';
-    std::size_t threadCount = std::thread::hardware_concurrency();
-    std::string numPlayersStr = argv[3];
-    std::size_t numPlayers = std::stoul(numPlayersStr);
+    std::string_view numPlayersStr = argv[3];
+    auto [ptr, err] = std::from_chars(numPlayersStr.data(), numPlayersStr.data() + numPlayersStr.size(), numPlayers);
+    if (err != std::errc())
+    {
+        std::cerr << "Error parsing number of players: " << numPlayersStr << '\n';
+        return false;
+    }
     if (numPlayers < 2 || numPlayers > 10)
     {
         std::cerr << "Number of players must be between 2 and 10.\n";
+        return false;
+    }
+    if (argc == 4)
+    {
+        numSimulations = 1'000'000;
+        return true;
+    }
+    std::string_view numSimulationsStr = argv[4];
+    auto [ptr2, err2] = std::from_chars(numSimulationsStr.data(), numSimulationsStr.data() + numSimulationsStr.size(), numSimulations);
+    if (err2 != std::errc())
+    {
+        std::cerr << "Error parsing number of simulations: " << numSimulationsStr << '\n';
+        return false;
+    }
+    if (numSimulations < 1 || numSimulations > 10'000'000)
+    {
+        std::cerr << "Number of simulations must be between 1 and 10,000,000.\n";
+        return false;
+    }
+    return true;
+}
+
+int main(int argc, const char **argv)
+{
+    Deck playerDeck;
+    Deck tableDeck;
+    std::size_t numPlayers = 0;
+    std::size_t simulations = 1'000'000;
+    if (!getParameters(argc, argv, playerDeck, tableDeck, numPlayers, simulations))
+    {
         return 1;
     }
+    std::size_t threadCount = std::thread::hardware_concurrency();
     auto start = std::chrono::high_resolution_clock::now();
-    static constexpr std::size_t simulations = 1'000'000;
     std::cout << "Probability of winning: " << probabilityOfWinning(playerDeck, tableDeck, simulations, threadCount, numPlayers) * 100 << "%\n";
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";

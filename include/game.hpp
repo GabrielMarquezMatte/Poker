@@ -14,15 +14,16 @@ inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, con
             Deck hand = Deck::emptyDeck();
             for (std::size_t l = 0; l < 7; ++l)
             {
-                if (l != i && l != j)
+                if (l == i || l == j)
                 {
-                    auto cardDealt = allCards.at(l);
-                    if (!cardDealt.has_value())
-                    {
-                        return {Classification::HighCard, Rank::Two};
-                    }
-                    hand.addCard(cardDealt.value());
+                    continue;
                 }
+                auto cardDealt = allCards.at(l);
+                if (!cardDealt.has_value())
+                {
+                    return {Classification::HighCard, Rank::Two};
+                }
+                hand.addCard(cardDealt.value());
             }
             ClassificationResult candidate = Hand::classify(hand);
             if (candidate > best)
