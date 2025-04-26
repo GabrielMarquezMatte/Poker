@@ -8,7 +8,7 @@ struct Card
 {
 private:
     std::uint32_t m_mask;
-    static inline constexpr std::optional<Rank> parseRank(const char value)
+    static inline constexpr std::optional<Rank> parseRank(const char value) noexcept
     {
         switch (value)
         {
@@ -47,7 +47,7 @@ private:
             return std::nullopt;
         }
     }
-    static inline constexpr std::optional<Suit> parseSuit(const char value)
+    static inline constexpr std::optional<Suit> parseSuit(const char value) noexcept
     {
         switch (value)
         {
@@ -69,25 +69,25 @@ private:
     }
 
 public:
-    inline constexpr Card() = default;
-    inline constexpr Card(Suit suit, Rank rank) : m_mask(static_cast<std::uint32_t>(suit) | static_cast<std::uint32_t>(rank << 4)) {}
-    inline constexpr Suit getSuit() const
+    inline constexpr Card() noexcept = default;
+    inline constexpr Card(Suit suit, Rank rank) noexcept : m_mask(static_cast<std::uint32_t>(suit) | static_cast<std::uint32_t>(rank << 4)) {}
+    inline constexpr Suit getSuit() const noexcept
     {
         return static_cast<Suit>(m_mask & 0xF);
     }
-    inline constexpr Rank getRank() const
+    inline constexpr Rank getRank() const noexcept
     {
         return static_cast<Rank>(m_mask >> 4);
     }
-    inline constexpr std::uint32_t getMask() const
+    inline constexpr std::uint32_t getMask() const noexcept
     {
         return m_mask;
     }
-    inline constexpr bool operator==(const Card &other) const
+    inline constexpr bool operator==(const Card &other) const noexcept
     {
         return m_mask == other.m_mask;
     }
-    static inline constexpr std::optional<Card> parseCard(const std::string_view str)
+    static inline constexpr std::optional<Card> parseCard(const std::string_view str) noexcept
     {
         if (str.size() != 2)
         {
@@ -103,7 +103,7 @@ public:
     }
 };
 
-inline std::ostream &operator<<(std::ostream &os, const Card &card)
+inline std::ostream &operator<<(std::ostream &os, const Card &card) noexcept
 {
     static constexpr std::array<std::string_view, 13> suits = {"Hearts", "Diamonds", "Clubs", "Spades"};
     return os << card.getRank() << " of " << card.getSuit();

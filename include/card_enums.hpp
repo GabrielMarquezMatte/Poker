@@ -43,43 +43,43 @@ enum class Classification
     StraightFlush = 1 << 8,
     RoyalFlush = 1 << 9,
 };
-inline constexpr Rank operator|(Rank lhs, Rank rhs)
+inline constexpr Rank operator|(Rank lhs, Rank rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
 }
-inline constexpr Rank operator&(Rank lhs, Rank rhs)
+inline constexpr Rank operator&(Rank lhs, Rank rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
 }
-inline constexpr Rank operator^(Rank lhs, Rank rhs)
+inline constexpr Rank operator^(Rank lhs, Rank rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) ^ static_cast<uint32_t>(rhs));
 }
-inline constexpr Rank operator~(Rank lhs)
+inline constexpr Rank operator~(Rank lhs) noexcept
 {
     return static_cast<Rank>(~static_cast<uint32_t>(lhs));
 }
-inline constexpr Rank operator>>(Rank lhs, uint32_t rhs)
+inline constexpr Rank operator>>(Rank lhs, uint32_t rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) >> rhs);
 }
-inline constexpr Rank operator<<(Rank lhs, uint32_t rhs)
+inline constexpr Rank operator<<(Rank lhs, uint32_t rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) << rhs);
 }
-inline constexpr Rank operator-(Rank lhs, uint32_t rhs)
+inline constexpr Rank operator-(Rank lhs, uint32_t rhs) noexcept
 {
     return static_cast<Rank>(static_cast<uint32_t>(lhs) - rhs);
 }
-inline constexpr std::size_t getRankIndex(Rank rank)
+inline constexpr std::size_t getRankIndex(Rank rank) noexcept
 {
     return std::countr_zero(static_cast<uint32_t>(rank));
 }
-inline constexpr std::size_t getSuitIndex(Suit suit)
+inline constexpr std::size_t getSuitIndex(Suit suit) noexcept
 {
     return std::countr_zero(static_cast<uint32_t>(suit));
 }
-inline constexpr std::size_t getClassificationIndex(Classification classification)
+inline constexpr std::size_t getClassificationIndex(Classification classification) noexcept
 {
     return std::countr_zero(static_cast<uint32_t>(classification));
 }
@@ -97,8 +97,8 @@ inline std::ostream &operator<<(std::ostream &os, const Rank rank)
 inline std::ostream &operator<<(std::ostream &os, const Classification classification)
 {
     static constexpr std::array<std::string_view, 10> classifications = {"High Card", "Pair", "Two Pair", "Three of a Kind",
-                                                                           "Straight", "Flush", "Full House", "Four of a Kind",
-                                                                           "Straight Flush", "Royal Flush"};
+                                                                         "Straight", "Flush", "Full House", "Four of a Kind",
+                                                                         "Straight Flush", "Royal Flush"};
     return os << classifications[getClassificationIndex(classification)];
 }
 #endif // __POKER_RANK_HPP__

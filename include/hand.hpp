@@ -9,6 +9,36 @@
 struct Hand
 {
 private:
+    struct StraightInfo
+    {
+        bool isStraight;
+        Rank highCard; // valid only if isStraight==true
+    };
+    static constexpr std::array<StraightInfo, 1 << 13> straightTable = []()
+    {
+        std::array<StraightInfo, 1 << 13> tbl{}; // 13 ranks ⇒ 2^13 possible masks
+
+        constexpr std::uint32_t LOW_STRAIGHT = static_cast<std::uint32_t>(Rank::LowStraight);
+
+        for (std::uint32_t m = 0; m < tbl.size(); ++m)
+        {
+            if (m == LOW_STRAIGHT)
+            {
+                tbl[m] = {true, Rank::Five};
+                continue;
+            }
+            std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
+            if (run5)
+            {
+                // highest set bit in run5 is the straight’s top card
+                int high = std::bit_width(run5) - 1;
+                tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
+                continue;
+            }
+            tbl[m] = {false, Rank::Two}; // highCard unused
+        }
+        return tbl;
+    }();
     static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
         std::uint32_t s0 = static_cast<std::uint32_t>(deckMask & 0x1FFFu);
@@ -19,7 +49,7 @@ private:
         bool flush = (std::popcount(s0) >= 5) || (std::popcount(s1) >= 5) || (std::popcount(s2) >= 5) || (std::popcount(s3) >= 5);
         return {flush, static_cast<Rank>(flushMask)};
     }
-    static inline constexpr std::array<int, 13> processCards(const Deck cards)
+    static inline constexpr std::array<int, 13> processCards(const Deck cards) noexcept
     {
         std::array<int, 13> counts{}; // Inicializa com 0
         // Assume que o primeiro naipe seja o de referência para verificar flush.
@@ -31,26 +61,13 @@ private:
         }
         return counts;
     }
-    static inline constexpr std::pair<bool, Rank> getStraight(const Rank rankMask)
+    static inline constexpr StraightInfo getStraight(const Rank rankMask) noexcept
     {
-        // Special Ace-low case: 2,3,4,5,A
-        if (rankMask == Rank::LowStraight)
-        {
-            return {true, Rank::Five};
-        }
-        std::uint32_t m = static_cast<std::uint32_t>(rankMask);
-        std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
-        if (run5 != 0)
-        {
-            int highCard = std::bit_width(run5) - 1;
-            return {true, static_cast<Rank>(Rank::Two << (highCard + 4))};
-        }
-        int highCard = std::bit_width(m) - 1;
-        return {false, static_cast<Rank>(Rank::Two << highCard)};
+        return straightTable[static_cast<std::uint32_t>(rankMask)];
     }
 
 public:
-    static inline constexpr ClassificationResult classify(const Deck cards)
+    static inline constexpr ClassificationResult classify(const Deck cards) noexcept
     {
         std::uint64_t deckMask = cards.getMask();
         auto [flush, rankValue] = getFlush(deckMask);

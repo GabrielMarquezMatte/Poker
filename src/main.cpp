@@ -13,19 +13,16 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     deck.removeCards(playerCards);
     deck.removeCards(tableCards);
     std::size_t numCardsToDeal = 5 - tableCards.size();
+    Deck randomCards = deck.popRandomCards(rng, numCardsToDeal + 2 * (numPlayers - 1));
     for (std::size_t i = 0; i < numCardsToDeal; ++i)
     {
-        tableCards.addCard(deck.popRandomCard(rng));
+        tableCards.addCard(randomCards.popCard());
     }
     ClassificationResult mainResult = classifyPlayer(playerCards, tableCards);
     Classification mainClassification = mainResult.getClassification();
-    switch (mainClassification)
+    if (mainClassification == Classification::RoyalFlush)
     {
-    case Classification::RoyalFlush:
-    case Classification::StraightFlush:
         return true;
-    default:
-        break;
     }
     ClassificationResult boardResult = classifyPlayer(Deck::emptyDeck(), tableCards);
     if (boardResult.getClassification() >= mainClassification && boardResult.getRankFlag() == mainResult.getRankFlag())
@@ -34,8 +31,8 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     }
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
-        Card opponentCard1 = deck.popRandomCard(rng);
-        Card opponentCard2 = deck.popRandomCard(rng);
+        Card opponentCard1 = deck.popCard();
+        Card opponentCard2 = deck.popCard();
         ClassificationResult playerResult = classifyPlayer(Deck::createDeck({opponentCard1, opponentCard2}), tableCards);
         if (playerResult > mainResult)
         {
@@ -142,9 +139,9 @@ bool getParameters(int argc, const char **argv, Deck &playerCards, Deck &tableCa
         std::cerr << "Error parsing number of simulations: " << numSimulationsStr << '\n';
         return false;
     }
-    if (numSimulations < 1 || numSimulations > 10'000'000)
+    if (numSimulations < 1 || numSimulations > 40'000'000)
     {
-        std::cerr << "Number of simulations must be between 1 and 10,000,000.\n";
+        std::cerr << "Number of simulations must be between 1 and 40,000,000.\n";
         return false;
     }
     return true;

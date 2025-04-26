@@ -3,7 +3,7 @@
 #include "classification_result.hpp"
 #include "hand.hpp"
 #include "deck.hpp"
-inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, const Deck tableCards)
+inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, const Deck tableCards) noexcept
 {
     Deck allCards = Deck::createDeck({playerCards, tableCards});
     ClassificationResult best = {Classification::HighCard, Rank::Two};
