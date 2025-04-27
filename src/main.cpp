@@ -95,21 +95,19 @@ bool getParameters(int argc, const char **argv, Deck &playerCards, Deck &tableCa
         return false;
     }
     std::string_view playerHand = argv[1];
-    std::optional<Deck> playerCardsOpt = Deck::parseHand(playerHand);
-    if (!playerCardsOpt.has_value() || playerCardsOpt->size() != 2)
+    playerCards = Deck::parseHand(playerHand);
+    if (playerCards.size() != 2)
     {
         std::cerr << "Invalid hand: " << playerHand << '\n';
         return false;
     }
-    playerCards = *playerCardsOpt;
     std::string_view tableCardsStr = argv[2];
-    std::optional<Deck> tableCardsOpt = Deck::parseHand(tableCardsStr);
-    if (!tableCardsOpt.has_value() || tableCardsOpt->size() > 5)
+    tableCards = Deck::parseHand(tableCardsStr);
+    if (tableCards.size() > 5)
     {
         std::cerr << "Invalid table cards: " << tableCardsStr << '\n';
         return false;
     }
-    tableCards = *tableCardsOpt;
     if (!checkUniqueCards(playerCards, tableCards))
     {
         std::cerr << "Duplicate cards found in hand or table.\n";
