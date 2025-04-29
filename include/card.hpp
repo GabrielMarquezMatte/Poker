@@ -69,7 +69,7 @@ private:
     }
 
 public:
-    inline constexpr Card() noexcept = default;
+    inline Card() noexcept = default;
     inline constexpr Card(Suit suit, Rank rank) noexcept : m_mask(static_cast<std::uint32_t>(suit) | static_cast<std::uint32_t>(rank << 4)) {}
     inline constexpr Suit getSuit() const noexcept
     {
@@ -105,7 +105,6 @@ public:
 
 inline std::ostream &operator<<(std::ostream &os, const Card &card) noexcept
 {
-    static constexpr std::array<std::string_view, 13> suits = {"Hearts", "Diamonds", "Clubs", "Spades"};
     return os << card.getRank() << " of " << card.getSuit();
 }
 #endif // __POKER_CARD_HPP__
