@@ -4,6 +4,8 @@
     "version": "0.0.1",
     "dependencies": [
         "pcg",
-        "gtest"
+        "gtest",
+        "benchmark",
+        "bshoshany-thread-pool"
     ]
 }

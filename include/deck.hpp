@@ -166,6 +166,14 @@ public:
         m_cardsBitmask &= ~resultMask;
         return result;
     }
+    inline Card popRandomCard(pcg64 &rng)
+    {
+        std::int64_t tmp = m_cardsBitmask;
+        std::uniform_int_distribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
+        std::uint64_t bit = pdep(1ULL << dist(rng), tmp);
+        m_cardsBitmask &= ~bit;
+        return calculateCardFromMask(bit);
+    }
     inline constexpr Card popCard() noexcept
     {
         std::int64_t tmp = m_cardsBitmask;
