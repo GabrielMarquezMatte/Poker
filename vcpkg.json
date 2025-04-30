@@ -6,6 +6,7 @@
         "pcg",
         "gtest",
         "benchmark",
-        "bshoshany-thread-pool"
+        "bshoshany-thread-pool",
+        "pybind11"
     ]
 }

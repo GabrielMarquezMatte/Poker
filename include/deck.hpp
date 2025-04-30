@@ -204,4 +204,14 @@ public:
         return DeckIterator(0);
     }
 };
+
+inline std::ostream &operator<<(std::ostream &os, const Deck &deck)
+{
+    os << "Deck: ";
+    for (const auto &card : deck)
+    {
+        os << card << " ";
+    }
+    return os;
+}
 #endif // __POKER_DECK_HPP__

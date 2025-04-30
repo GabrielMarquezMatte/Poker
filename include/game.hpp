@@ -87,9 +87,9 @@ inline double probabilityOfWinning(pcg64 &rng, const Deck playerCards, const Dec
     }
     return static_cast<double>(wins) / numSimulations;
 }
-double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool &threadPool)
+double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
-    std::uint32_t numThreads = threadPool.get_thread_count();
+    std::size_t numThreads = threadPool.get_thread_count();
     std::size_t simulationsPerThread = numSimulations / numThreads;
     std::vector<std::future<std::size_t>> threads;
     threads.reserve(numThreads);
