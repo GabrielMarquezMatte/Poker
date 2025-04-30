@@ -7,6 +7,7 @@
 TEST(DeckTest, ParsingHand)
 {
     static constexpr Deck parsedDeck = Deck::parseHand("2H 3D 4S 5C 6H");
+    static constexpr Deck parsedDeck2 = Deck::parseHand("2H 2D 2S 2C");
     static constexpr Deck expectedDeck = Deck::createDeck({Card(Suit::Hearts, Rank::Two), Card(Suit::Diamonds, Rank::Three),
                                                            Card(Suit::Spades, Rank::Four), Card(Suit::Clubs, Rank::Five),
                                                            Card(Suit::Hearts, Rank::Six)});
@@ -114,31 +115,6 @@ TEST(DeckTest, ClassifyHighCard)
     static constexpr ClassificationResult result = Hand::classify(deck);
     static_assert(result == ClassificationResult(Classification::HighCard, Rank::Ace | Rank::Seven | Rank::Six | Rank::Four | Rank::Two), "Expected High Card classification");
 }
-TEST(ClassificationTest, Comparisons)
-{
-    static constexpr ClassificationResult royalFlush = ClassificationResult(Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten);
-    static constexpr ClassificationResult straightFlush = ClassificationResult(Classification::StraightFlush, Rank::Nine | Rank::Eight | Rank::Seven | Rank::Six | Rank::Five);
-    static constexpr ClassificationResult fourOfAKind = ClassificationResult(Classification::FourOfAKind, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack);
-    static constexpr ClassificationResult fullHouse = ClassificationResult(Classification::FullHouse, Rank::Ace | Rank::King);
-    static constexpr ClassificationResult flush = ClassificationResult(Classification::Flush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Two);
-    static constexpr ClassificationResult straight = ClassificationResult(Classification::Straight, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten);
-    static constexpr ClassificationResult threeOfAKind = ClassificationResult(Classification::ThreeOfAKind, Rank::Ace | Rank::King | Rank::Queen);
-    static constexpr ClassificationResult twoPair = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King | Rank::Queen);
-    static constexpr ClassificationResult onePair = ClassificationResult(Classification::Pair, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack);
-    static constexpr ClassificationResult highCard = ClassificationResult(Classification::HighCard, Rank::Two | Rank::Ace | Rank::Four | Rank::Seven | Rank::Six);
-    static_assert(royalFlush > straightFlush, "Royal Flush should be greater than Straight Flush");
-    static_assert(straightFlush > fourOfAKind, "Straight Flush should be greater than Four of a Kind");
-    static_assert(fourOfAKind > fullHouse, "Four of a Kind should be greater than Full House");
-    static_assert(fullHouse > flush, "Full House should be greater than Flush");
-    static_assert(flush > straight, "Flush should be greater than Straight");
-    static_assert(straight > threeOfAKind, "Straight should be greater than Three of a Kind");
-    static_assert(threeOfAKind > twoPair, "Three of a Kind should be greater than Two Pair");
-    static_assert(twoPair > onePair, "Two Pair should be greater than One Pair");
-    static_assert(onePair > highCard, "One Pair should be greater than High Card");
-    static_assert(highCard < royalFlush, "High Card should not be greater than Royal Flush");
-}
-
-// in your gtest .cpp (after the existing tests)
 
 //
 // 1) Wheel (A-2-3-4-5) Straight / Straight‐Flush

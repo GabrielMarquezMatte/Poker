@@ -96,7 +96,7 @@ static void BM_ProbabilityOfWinningSequential(benchmark::State& st)
         benchmark::DoNotOptimize(probability);
     }
 }
-BENCHMARK(BM_ProbabilityOfWinningSequential)->DenseRange(2, 10, 1);
+BENCHMARK(BM_ProbabilityOfWinningSequential)->DenseRange(2, 10, 1)->Unit(benchmark::kMillisecond);
 
 static void BM_ProbabilityOfWinningParallel(benchmark::State& st)
 {
@@ -114,6 +114,6 @@ static void BM_ProbabilityOfWinningParallel(benchmark::State& st)
     }
 }
 
-BENCHMARK(BM_ProbabilityOfWinningParallel)->DenseRange(2, 10, 1);
+BENCHMARK(BM_ProbabilityOfWinningParallel)->DenseRange(2, 10, 1)->Unit(benchmark::kMillisecond);
 
 BENCHMARK_MAIN();

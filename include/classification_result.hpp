@@ -58,7 +58,7 @@ inline std::ostream &operator<<(std::ostream &os, const ClassificationResult res
         os << static_cast<Rank>(1 << rank);
         if (rankFlag > 0)
         {
-            os << " ";
+            os << ' ';
         }
     }
     return os;

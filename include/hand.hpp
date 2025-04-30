@@ -28,17 +28,68 @@ private:
                 continue;
             }
             std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
-            if (run5)
+            if (!run5)
             {
-                // highest set bit in run5 is the straight’s top card
-                int high = std::bit_width(run5) - 1;
-                tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
+                tbl[m] = {false, Rank::Two}; // highCard unused
                 continue;
             }
-            tbl[m] = {false, Rank::Two}; // highCard unused
+            // highest set bit in run5 is the straight’s top card
+            int high = std::bit_width(run5) - 1;
+            tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
         }
         return tbl;
     }();
+    static constexpr std::array<std::uint64_t, 13> rankMasks = []()
+    {
+        std::array<std::uint64_t, 13> m{};
+        for (std::size_t r = 0; r < 13; ++r)
+        {
+            // suit offsets: 0,13,26,39
+            m[r] = (1ULL << (r + 0 * 13)) | (1ULL << (r + 1 * 13)) | (1ULL << (r + 2 * 13)) | (1ULL << (r + 3 * 13));
+        }
+        return m;
+    }();
+    static inline constexpr std::uint64_t pext(std::uint64_t x, std::uint64_t mask) noexcept
+    {
+        if (!std::is_constant_evaluated())
+        {
+            return _pext_u64(x, mask);
+        }
+        std::uint64_t result = 0;
+        std::uint64_t outBit = 1;
+        while (mask)
+        {
+            std::uint64_t lowest = mask & static_cast<std::int64_t>(-static_cast<std::int64_t>(mask));
+            if (x & lowest)
+            {
+                result |= outBit;
+            }
+            mask &= mask - 1;
+            outBit <<= 1;
+        }
+        return result;
+    }
+    static inline constexpr std::pair<int, int> topTwoCounts(std::uint64_t handMask) noexcept
+    {
+        int maxC = 0, secondC = 0;
+        for (int r = 0; r < 13; ++r)
+        {
+            // extract the 4 suit-bits for rank r into the low 4 bits
+            std::uint64_t nib = pext(handMask, rankMasks[r]);
+            // hardware popcount of that nibble is your count
+            int c = std::popcount(nib);
+            if (c > maxC)
+            {
+                secondC = maxC;
+                maxC = c;
+            }
+            else if (c > secondC)
+            {
+                secondC = c;
+            }
+        }
+        return {maxC, secondC};
+    }
     static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
         std::uint32_t s0 = static_cast<std::uint32_t>(deckMask & 0x1FFFu);
@@ -48,18 +99,6 @@ private:
         std::uint32_t flushMask = s0 | s1 | s2 | s3;
         bool flush = (std::popcount(s0) >= 5) || (std::popcount(s1) >= 5) || (std::popcount(s2) >= 5) || (std::popcount(s3) >= 5);
         return {flush, static_cast<Rank>(flushMask)};
-    }
-    static inline constexpr std::array<int, 13> processCards(const Deck cards) noexcept
-    {
-        std::array<int, 13> counts{}; // Inicializa com 0
-        // Assume que o primeiro naipe seja o de referência para verificar flush.
-        for (const Card card : cards)
-        {
-            Rank cardRank = card.getRank();
-            // Atualiza contagem. Supondo que getRankIndex retorne um índice de 0 a 12.
-            counts[getRankIndex(cardRank)]++;
-        }
-        return counts;
     }
     static inline constexpr StraightInfo getStraight(const Rank rankMask) noexcept
     {
@@ -80,22 +119,7 @@ public:
             }
             return {Classification::StraightFlush, highRank};
         }
-        std::array<int, 13> counts = processCards(cards);
-        int maxCount = 0;
-        int secondMaxCount = 0;
-        for (int count : counts)
-        {
-            if (count > maxCount)
-            {
-                secondMaxCount = maxCount;
-                maxCount = count;
-                continue;
-            }
-            if (count > secondMaxCount)
-            {
-                secondMaxCount = count;
-            }
-        }
+        auto [maxCount, secondMaxCount] = topTwoCounts(deckMask);
         if (maxCount == 4)
         {
             return {Classification::FourOfAKind, rankValue};
