@@ -221,6 +221,14 @@ public:
     {
         return DeckIterator(0);
     }
+    inline constexpr bool operator==(const Deck &other) const noexcept
+    {
+        return m_cardsBitmask == other.m_cardsBitmask;
+    }
+    inline constexpr bool operator!=(const Deck &other) const noexcept
+    {
+        return m_cardsBitmask != other.m_cardsBitmask;
+    }
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Deck &deck)

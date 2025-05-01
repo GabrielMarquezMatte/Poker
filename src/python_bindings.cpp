@@ -58,6 +58,7 @@ PYBIND11_MODULE(poker, m)
         .def("add_card", &Deck::addCard, py::arg("card"))
         .def("remove_cards", &Deck::removeCards, py::arg("cards"))
         .def("pop_card", &Deck::popCard)
+        .def("pop_random_card", &Deck::popRandomCard, py::arg("generator"))
         .def("pop_random_cards", &Deck::popRandomCards, py::arg("generator"), py::arg("count"))
         .def("at", &Deck::at, py::arg("index"))
         .def_static("create_full_deck", &Deck::createFullDeck)
@@ -74,6 +75,26 @@ PYBIND11_MODULE(poker, m)
             return oss.str(); });
     py::class_<BS::thread_pool<BS::tp::none>>(m, "ThreadPool")
         .def(py::init<std::size_t>(), py::arg("num_threads") = std::thread::hardware_concurrency());
+    py::enum_<GameResult>(m, "GameResult")
+        .value("PlayerWins", GameResult::Win)
+        .value("Lose", GameResult::Lose)
+        .value("Tie", GameResult::Tie)
+        .export_values()
+        .def("__repr__", [](const GameResult &gr)
+             {
+                switch (gr)
+                {
+                case GameResult::Win:
+                    return "Win";
+                case GameResult::Lose:
+                    return "Lose";
+                case GameResult::Tie:
+                    return "Tie";
+                default:
+                    return "Unknown";
+                } });
+    m.def("compare_hands", [](const Deck playerCards, const Deck tableCards, const std::vector<Deck> &opponentsCards)
+          { return compareHands(playerCards, tableCards, opponentsCards); }, py::arg("player_cards"), py::arg("table_cards"), py::arg("opponents_cards"));
     m.def("player_wins_random_game", &playerWinsRandomGame, py::arg("rng"), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_players"));
     m.def("probability_of_winning", py::overload_cast<pcg64 &, const Deck, const Deck, std::size_t, std::size_t>(&probabilityOfWinning), py::arg("rng"), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"));
     m.def("probability_of_winning", py::overload_cast<const Deck, const Deck, std::size_t, std::size_t, std::size_t>(&probabilityOfWinning), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"), py::arg("num_threads") = std::thread::hardware_concurrency());

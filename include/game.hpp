@@ -6,6 +6,12 @@
 #include <BS_thread_pool.hpp>
 #include <vector>
 #include <thread>
+enum class GameResult
+{
+    Win,
+    Lose,
+    Tie,
+};
 inline constexpr ClassificationResult classifyHand(const Deck allCards) noexcept
 {
     ClassificationResult best = {Classification::HighCard, Rank::Two};
@@ -40,6 +46,28 @@ inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, con
 {
     Deck allCards = Deck::createDeck({playerCards, tableCards});
     return classifyHand(allCards);
+}
+inline constexpr GameResult compareHands(const Deck playerCards, const Deck tableCards, const std::span<const Deck> opponents) noexcept
+{
+    ClassificationResult playerResult = classifyPlayer(playerCards, tableCards);
+    bool sawTie = false;
+    for (const auto &opponent : opponents)
+    {
+        ClassificationResult opponentResult = classifyPlayer(opponent, tableCards);
+        if (opponentResult > playerResult)
+        {
+            return GameResult::Lose;
+        }
+        if (opponentResult == playerResult)
+        {
+            sawTie = true;
+        }
+    }
+    if (sawTie)
+    {
+        return GameResult::Tie;
+    }
+    return GameResult::Win;
 }
 bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
 {
