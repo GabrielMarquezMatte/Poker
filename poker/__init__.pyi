@@ -1,0 +1,103 @@
+# poker.pyi
+from enum import Enum
+from typing import Sequence, overload
+
+class pcg64:
+    def __init__(self, seed: int = ...) -> None: ...
+    """Gerador PCG64. Se nenhum seed for passado, usa valor padrão."""
+
+class Rank(Enum):
+    Two: "Rank"
+    Three: "Rank"
+    Four: "Rank"
+    Five: "Rank"
+    Six: "Rank"
+    Seven: "Rank"
+    Eight: "Rank"
+    Nine: "Rank"
+    Ten: "Rank"
+    Jack: "Rank"
+    Queen: "Rank"
+    King: "Rank"
+    Ace: "Rank"
+    def __repr__(self) -> str: ...
+
+class Suit(Enum):
+    Clubs: "Suit"
+    Diamonds: "Suit"
+    Hearts: "Suit"
+    Spades: "Suit"
+    def __repr__(self) -> str: ...
+
+class Card:
+    def __init__(self, suit: Suit, rank: Rank) -> None: ...
+    @property
+    def rank(self) -> Rank: ...
+    @property
+    def suit(self) -> Suit: ...
+    @staticmethod
+    def parse_card(card: str) -> "Card": ...
+    def __eq__(self, other: object) -> bool: ...
+    def __ne__(self, other: object) -> bool: ...
+    def __repr__(self) -> str: ...
+
+class Deck:
+    def __init__(self) -> None: ...
+    def add_card(self, card: Card) -> None: ...
+    def remove_cards(self, cards: Sequence[Card]) -> None: ...
+    def pop_card(self) -> Card: ...
+    def pop_random_cards(self, generator: pcg64, count: int) -> "Deck": ...
+    def at(self, index: int) -> Card: ...
+    @staticmethod
+    def create_full_deck() -> "Deck": ...
+    @overload
+    @staticmethod
+    def create_deck(cards: Sequence[Card]) -> "Deck": ...
+    @overload
+    @staticmethod
+    def create_deck(decks: Sequence["Deck"]) -> "Deck": ...
+    @staticmethod
+    def empty_deck() -> "Deck": ...
+    @staticmethod
+    def parse_hand(hand: str) -> "Deck": ...
+    @property
+    def size(self) -> int: ...
+    @property
+    def mask(self) -> int: ...
+    def __repr__(self) -> str: ...
+
+class ThreadPool:
+    def __init__(self, num_threads: int = ...) -> None: ...
+
+def player_wins_random_game(
+    rng: pcg64,
+    player_cards: Deck,
+    table_cards: Deck,
+    num_players: int
+) -> bool: ...
+
+@overload
+def probability_of_winning(
+    rng: pcg64,
+    player_cards: Deck,
+    table_cards: Deck,
+    num_simulations: int,
+    num_players: int
+) -> float: ...
+@overload
+def probability_of_winning(
+    player_cards: Deck,
+    table_cards: Deck,
+    num_simulations: int,
+    num_players: int,
+    num_threads: int = ...
+) -> float: ...
+@overload
+def probability_of_winning(
+    player_cards: Deck,
+    table_cards: Deck,
+    num_simulations: int,
+    num_players: int,
+    thread_pool: ThreadPool
+) -> float: ...
+def probability_of_winning(*args, **kwargs) -> float: ...

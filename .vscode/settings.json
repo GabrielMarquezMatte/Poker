@@ -89,6 +89,9 @@
         "cstdarg": "cpp",
         "coroutine": "cpp",
         "resumable": "cpp",
-        "future": "cpp"
+        "future": "cpp",
+        "*.rh": "cpp",
+        "*.inc": "cpp",
+        "*.def": "cpp"
     }
 }

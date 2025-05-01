@@ -33,3 +33,4 @@ target_include_directories(${PROJECT_NAME}_Benchmark PRIVATE ${PCG_INCLUDE_DIRS}
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main)
 
 pybind11_add_module(poker src/python_bindings.cpp)
+install(TARGETS poker DESTINATION .)

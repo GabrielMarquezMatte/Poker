@@ -93,7 +93,25 @@ public:
         }
         return deck;
     }
+    static inline constexpr Deck createDeck(const std::vector<Deck>& decks) noexcept
+    {
+        Deck deck = Deck::emptyDeck();
+        for (const Deck d : decks)
+        {
+            deck.m_cardsBitmask |= d.m_cardsBitmask;
+        }
+        return deck;
+    }
     static inline constexpr Deck createDeck(const std::initializer_list<Card> cards) noexcept
+    {
+        Deck deck = Deck::emptyDeck();
+        for (const Card card : cards)
+        {
+            deck.addCard(card);
+        }
+        return deck;
+    }
+    static inline constexpr Deck createDeck(const std::vector<Card>& cards) noexcept
     {
         Deck deck = Deck::emptyDeck();
         for (const Card card : cards)
