@@ -72,8 +72,9 @@ static void BM_PlayerWinsRandomGame(benchmark::State& st)
 {
     pcg64 rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
-    Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = deck.popRandomCards(rng, 5);
+    Deck allCards = deck.popRandomCards(rng, 7);
+    Deck playerCards = allCards.popCards(2);
+    Deck tableCards = allCards.popCards(5);
     std::size_t numPlayers = st.range(0);
     for (auto _ : st)
     {
@@ -87,8 +88,9 @@ static void BM_ProbabilityOfWinningSequential(benchmark::State& st)
 {
     pcg64 rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
-    Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = deck.popRandomCards(rng, 5);
+    Deck allCards = deck.popRandomCards(rng, 7);
+    Deck playerCards = allCards.popCards(2);
+    Deck tableCards = allCards.popCards(5);
     std::size_t numPlayers = st.range(0);
     for (auto _ : st)
     {
@@ -102,8 +104,9 @@ static void BM_ProbabilityOfWinningParallel(benchmark::State& st)
 {
     pcg64 rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
-    Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = deck.popRandomCards(rng, 5);
+    Deck allCards = deck.popRandomCards(rng, 7);
+    Deck playerCards = allCards.popCards(2);
+    Deck tableCards = allCards.popCards(5);
     std::size_t numPlayers = st.range(0);
     std::uint32_t threadCount = std::thread::hardware_concurrency();
     BS::thread_pool pool(threadCount);

@@ -76,10 +76,7 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     deck.removeCards(tableCards);
     std::size_t numCardsToDeal = 5 - tableCards.size();
     Deck randomCards = deck.popRandomCards(rng, numCardsToDeal + 2 * (numPlayers - 1));
-    for (std::size_t i = 0; i < numCardsToDeal; ++i)
-    {
-        tableCards.addCard(randomCards.popCard());
-    }
+    tableCards.addCards(randomCards.popCards(numCardsToDeal));
     ClassificationResult mainResult = classifyPlayer(playerCards, tableCards);
     Classification mainClassification = mainResult.getClassification();
     if (mainClassification == Classification::RoyalFlush)
@@ -93,9 +90,7 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     }
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
-        Card opponentCard1 = deck.popCard();
-        Card opponentCard2 = deck.popCard();
-        ClassificationResult playerResult = classifyPlayer(Deck::createDeck({opponentCard1, opponentCard2}), tableCards);
+        ClassificationResult playerResult = classifyPlayer(deck.popCards(2), tableCards);
         if (playerResult > mainResult)
         {
             return false;
