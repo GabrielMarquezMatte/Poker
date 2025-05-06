@@ -63,9 +63,9 @@ bool getParameters(int argc, const char **argv, Deck &playerCards, Deck &tableCa
         std::cerr << "Error parsing number of simulations: " << numSimulationsStr << '\n';
         return false;
     }
-    if (numSimulations < 1 || numSimulations > 100'000'000)
+    if (numSimulations < 1 || numSimulations > 500'000'000)
     {
-        std::cerr << "Number of simulations must be between 1 and 100,000,000.\n";
+        std::cerr << "Number of simulations must be between 1 and 500,000,000.\n";
         return false;
     }
     return true;
@@ -83,9 +83,12 @@ int main(int argc, const char **argv)
     }
     std::uint32_t threadCount = std::thread::hardware_concurrency();
     BS::thread_pool pool(threadCount);
-    auto start = std::chrono::high_resolution_clock::now();
-    std::cout << "Probability of winning: " << probabilityOfWinning(playerDeck, tableDeck, simulations, numPlayers, pool) * 100 << "%\n";
-    auto end = std::chrono::high_resolution_clock::now();
-    std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";
+    while (true)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::cout << "Probability of winning: " << probabilityOfWinning(playerDeck, tableDeck, simulations, numPlayers, pool) * 100 << "%\n";
+        auto end = std::chrono::high_resolution_clock::now();
+        std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";
+    }
     return 0;
 }

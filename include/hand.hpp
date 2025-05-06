@@ -96,9 +96,18 @@ private:
         std::uint32_t s1 = static_cast<std::uint32_t>((deckMask >> 13) & 0x1FFFu);
         std::uint32_t s2 = static_cast<std::uint32_t>((deckMask >> 26) & 0x1FFFu);
         std::uint32_t s3 = static_cast<std::uint32_t>((deckMask >> 39) & 0x1FFFu);
-        std::uint32_t flushMask = s0 | s1 | s2 | s3;
-        bool flush = (std::popcount(s0) >= 5) || (std::popcount(s1) >= 5) || (std::popcount(s2) >= 5) || (std::popcount(s3) >= 5);
-        return {flush, static_cast<Rank>(flushMask)};
+        // for each suit, if popcount>=5 yield that mask, else zero
+        std::uint32_t f0 = (std::popcount(s0) >= 5) ? s0 : 0;
+        std::uint32_t f1 = (std::popcount(s1) >= 5) ? s1 : 0;
+        std::uint32_t f2 = (std::popcount(s2) >= 5) ? s2 : 0;
+        std::uint32_t f3 = (std::popcount(s3) >= 5) ? s3 : 0;
+        // OR them together; at most one will be nonzero
+        std::uint32_t flushMask = f0 | f1 | f2 | f3;
+        bool isFlush = flushMask != 0;
+        std::uint32_t rankMask = isFlush
+                                     ? flushMask
+                                     : (s0 | s1 | s2 | s3);
+        return {isFlush, static_cast<Rank>(rankMask)};
     }
     static inline constexpr StraightInfo getStraight(const Rank rankMask) noexcept
     {

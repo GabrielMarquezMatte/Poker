@@ -158,7 +158,7 @@ TEST(ClassificationTest, classifyPlayerBestOfSeven)
                                                     Card(Suit::Hearts, Rank::King)});
     // best 5 of 7 is a Spade flush King-high
     static constexpr ClassificationResult res = Hand::classify(Deck::createDeck({hole, board}));
-    static constexpr ClassificationResult expected = ClassificationResult(Classification::Flush, Rank::King | Rank::Ace | Rank::Queen | Rank::Four | Rank::Three | Rank::Two);
+    static constexpr ClassificationResult expected = ClassificationResult(Classification::Flush, Rank::King | Rank::Queen | Rank::Four | Rank::Three | Rank::Two);
     static_assert(res == expected, "Expected best hand to be a King-high Flush");
 }
 TEST(DeckTest, ParseInvalidFormat)
