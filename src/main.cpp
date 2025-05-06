@@ -63,9 +63,9 @@ bool getParameters(int argc, const char **argv, Deck &playerCards, Deck &tableCa
         std::cerr << "Error parsing number of simulations: " << numSimulationsStr << '\n';
         return false;
     }
-    if (numSimulations < 1 || numSimulations > 40'000'000)
+    if (numSimulations < 1 || numSimulations > 100'000'000)
     {
-        std::cerr << "Number of simulations must be between 1 and 40,000,000.\n";
+        std::cerr << "Number of simulations must be between 1 and 100,000,000.\n";
         return false;
     }
     return true;

@@ -12,48 +12,13 @@ enum class GameResult
     Lose,
     Tie,
 };
-inline constexpr ClassificationResult classifyHand(const Deck allCards) noexcept
-{
-    ClassificationResult best = {Classification::HighCard, Rank::Two};
-    for (std::size_t i = 0; i < 7; ++i)
-    {
-        for (std::size_t j = i + 1; j < 7; ++j)
-        {
-            Deck hand = Deck::emptyDeck();
-            for (std::size_t l = 0; l < 7; ++l)
-            {
-                if (l == i || l == j)
-                {
-                    continue;
-                }
-                auto cardDealt = allCards.at(l);
-                if (!cardDealt.has_value())
-                {
-                    return {Classification::HighCard, Rank::Two};
-                }
-                hand.addCard(cardDealt.value());
-            }
-            ClassificationResult candidate = Hand::classify(hand);
-            if (candidate > best)
-            {
-                best = candidate;
-            }
-        }
-    }
-    return best;
-}
-inline constexpr ClassificationResult classifyPlayer(const Deck playerCards, const Deck tableCards) noexcept
-{
-    Deck allCards = Deck::createDeck({playerCards, tableCards});
-    return classifyHand(allCards);
-}
 inline constexpr GameResult compareHands(const Deck playerCards, const Deck tableCards, const std::span<const Deck> opponents) noexcept
 {
-    ClassificationResult playerResult = classifyPlayer(playerCards, tableCards);
+    ClassificationResult playerResult = Hand::classify(Deck::createDeck({playerCards, tableCards}));
     bool sawTie = false;
     for (const auto &opponent : opponents)
     {
-        ClassificationResult opponentResult = classifyPlayer(opponent, tableCards);
+        ClassificationResult opponentResult = Hand::classify(Deck::createDeck({opponent, tableCards}));
         if (opponentResult > playerResult)
         {
             return GameResult::Lose;
@@ -77,20 +42,10 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     std::size_t numCardsToDeal = 5 - tableCards.size();
     Deck randomCards = deck.popRandomCards(rng, numCardsToDeal + 2 * (numPlayers - 1));
     tableCards.addCards(randomCards.popCards(numCardsToDeal));
-    ClassificationResult mainResult = classifyPlayer(playerCards, tableCards);
-    Classification mainClassification = mainResult.getClassification();
-    if (mainClassification == Classification::RoyalFlush)
-    {
-        return true;
-    }
-    ClassificationResult boardResult = classifyPlayer(Deck::emptyDeck(), tableCards);
-    if (boardResult.getClassification() >= mainClassification && boardResult.getRankFlag() == mainResult.getRankFlag())
-    {
-        return false;
-    }
+    ClassificationResult mainResult = Hand::classify(Deck::createDeck({playerCards, tableCards}));
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
-        ClassificationResult playerResult = classifyPlayer(deck.popCards(2), tableCards);
+        ClassificationResult playerResult = Hand::classify(Deck::createDeck({deck.popCards(2), tableCards}));
         if (playerResult > mainResult)
         {
             return false;
