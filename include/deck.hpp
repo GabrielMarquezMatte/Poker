@@ -2,10 +2,10 @@
 #define __POKER_DECK_HPP__
 #include <array>
 #include <span>
-#include <pcg_random.hpp>
 #include <random>
 #include <immintrin.h>
 #include "card.hpp"
+#include "random.hpp"
 struct Deck
 {
 private:
@@ -164,7 +164,7 @@ public:
     {
         m_cardsBitmask &= ~calculateCardMask(card);
     }
-    inline Deck popRandomCards(pcg64 &rng, std::size_t count) noexcept
+    inline constexpr Deck popRandomCards(omp::XoroShiro128Plus &rng, std::size_t count) noexcept
     {
         const std::size_t total = size();
         if (count >= total)
@@ -175,7 +175,7 @@ public:
         }
         std::uint64_t mask = static_cast<std::uint64_t>(m_cardsBitmask);
         std::uint64_t resultMask = 0;
-        std::uniform_int_distribution<std::size_t> dist;
+        omp::FastUniformIntDistribution<std::size_t> dist;
         for (std::size_t i = 0; i < count; ++i)
         {
             std::size_t remaining = std::popcount(mask);
@@ -189,10 +189,10 @@ public:
         m_cardsBitmask &= ~resultMask;
         return result;
     }
-    inline Card popRandomCard(pcg64 &rng)
+    inline Card popRandomCard(omp::XoroShiro128Plus &rng)
     {
         std::int64_t tmp = m_cardsBitmask;
-        std::uniform_int_distribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
+        omp::FastUniformIntDistribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
         std::uint64_t bit = pdep(1ULL << dist(rng), tmp);
         m_cardsBitmask &= ~bit;
         return calculateCardFromMask(bit);

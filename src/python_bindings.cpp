@@ -8,7 +8,6 @@ namespace py = pybind11;
 PYBIND11_MODULE(poker, m)
 {
     m.doc() = "Poker game simulation module";
-    py::class_<pcg64>(m, "pcg64").def(py::init<>()).def(py::init<std::uint64_t>(), py::arg("seed"));
     py::enum_<Rank>(m, "Rank")
         .value("Two", Rank::Two)
         .value("Three", Rank::Three)
@@ -96,7 +95,7 @@ PYBIND11_MODULE(poker, m)
     m.def("compare_hands", [](const Deck playerCards, const Deck tableCards, const std::vector<Deck> &opponentsCards)
           { return compareHands(playerCards, tableCards, opponentsCards); }, py::arg("player_cards"), py::arg("table_cards"), py::arg("opponents_cards"));
     m.def("player_wins_random_game", &playerWinsRandomGame, py::arg("rng"), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_players"));
-    m.def("probability_of_winning", py::overload_cast<pcg64 &, const Deck, const Deck, std::size_t, std::size_t>(&probabilityOfWinning), py::arg("rng"), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"));
+    m.def("probability_of_winning", py::overload_cast<omp::XoroShiro128Plus &, const Deck, const Deck, std::size_t, std::size_t>(&probabilityOfWinning), py::arg("rng"), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"));
     m.def("probability_of_winning", py::overload_cast<const Deck, const Deck, std::size_t, std::size_t, std::size_t>(&probabilityOfWinning), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"), py::arg("num_threads") = std::thread::hardware_concurrency());
     m.def("probability_of_winning", py::overload_cast<const Deck, const Deck, std::size_t, std::size_t, BS::thread_pool<BS::tp::none> &>(&probabilityOfWinning), py::arg("player_cards"), py::arg("table_cards"), py::arg("num_simulations"), py::arg("num_players"), py::arg("thread_pool"));
 }

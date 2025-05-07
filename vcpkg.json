@@ -3,7 +3,6 @@
     "name": "sudoku-solver",
     "version": "0.0.1",
     "dependencies": [
-        "pcg",
         "gtest",
         "benchmark",
         "bshoshany-thread-pool",

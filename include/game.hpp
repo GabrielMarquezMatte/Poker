@@ -34,7 +34,7 @@ inline constexpr GameResult compareHands(const Deck playerCards, const Deck tabl
     }
     return GameResult::Win;
 }
-bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
+constexpr bool playerWinsRandomGame(omp::XoroShiro128Plus &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
 {
     Deck deck = Deck::createFullDeck();
     deck.removeCards(playerCards);
@@ -53,7 +53,7 @@ bool playerWinsRandomGame(pcg64 &rng, const Deck playerCards, Deck tableCards, s
     }
     return true;
 }
-inline double probabilityOfWinning(pcg64 &rng, const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
+inline constexpr double probabilityOfWinning(omp::XoroShiro128Plus &rng, const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
 {
     std::size_t wins = 0;
     for (std::size_t i = 0; i < numSimulations; ++i)
@@ -76,7 +76,7 @@ double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::
     {
         threads.push_back(threadPool.submit_task([&, i]()
                                {
-            pcg64 threadRng(std::random_device{}());
+            omp::XoroShiro128Plus threadRng(std::random_device{}());
             std::size_t threadWins = 0;
             for (std::size_t j = 0; j < simulationsPerThread; ++j)
             {
@@ -88,7 +88,7 @@ double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::
             return threadWins; }));
     }
     std::size_t wins = 0;
-    pcg64 threadRng(std::random_device{}());
+    omp::XoroShiro128Plus threadRng(std::random_device{}());
     for (std::size_t i = 0; i < remainingSimulations; ++i)
     {
         if (playerWinsRandomGame(threadRng, playerCards, tableCards, numPlayers))
@@ -112,7 +112,7 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
     {
         threads.emplace_back([&, i]()
                              {
-            pcg64 threadRng(std::random_device{}());
+            omp::XoroShiro128Plus threadRng(std::random_device{}());
             std::size_t threadWins = 0;
             for (std::size_t j = 0; j < simulationsPerThread; ++j)
             {
@@ -124,7 +124,7 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
             wins += threadWins; });
     }
     std::size_t remainingSimulations = numSimulations % numThreads;
-    pcg64 threadRng(std::random_device{}());
+    omp::XoroShiro128Plus threadRng(std::random_device{}());
     std::size_t threadWins = 0;
     for (std::size_t i = 0; i < remainingSimulations; ++i)
     {

@@ -18,11 +18,11 @@ private:
     {
         std::array<StraightInfo, 1 << 13> tbl{}; // 13 ranks ⇒ 2^13 possible masks
 
-        constexpr std::uint32_t LOW_STRAIGHT = static_cast<std::uint32_t>(Rank::LowStraight);
+        constexpr std::uint32_t lowStraight = static_cast<std::uint32_t>(Rank::LowStraight);
 
         for (std::uint32_t m = 0; m < tbl.size(); ++m)
         {
-            if (m == LOW_STRAIGHT)
+            if (m == lowStraight)
             {
                 tbl[m] = {true, Rank::Five};
                 continue;
@@ -49,6 +49,24 @@ private:
         }
         return m;
     }();
+    static constexpr std::array<uint16_t, 1 << 13> flushTable = []()
+    {
+        std::array<uint16_t, 1 << 13> table{};
+        for (std::uint32_t m = 0; m < (1 << 13); ++m)
+        {
+            table[m] = (std::popcount(m) >= 5 ? uint16_t(m) : 0);
+        }
+        return table;
+    }();
+    static constexpr std::array<std::uint8_t, 16> popCountTable = []()
+    {
+        std::array<std::uint8_t, 16> table{};
+        for (std::uint32_t i = 0; i < table.size(); ++i)
+        {
+            table[i] = static_cast<std::uint8_t>(std::popcount(i));
+        }
+        return table;
+    }();
     static inline constexpr std::uint64_t pext(std::uint64_t x, std::uint64_t mask) noexcept
     {
         if (!std::is_constant_evaluated())
@@ -69,15 +87,13 @@ private:
         }
         return result;
     }
-    static inline constexpr std::pair<int, int> topTwoCounts(std::uint64_t handMask) noexcept
+    static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(std::uint64_t handMask) noexcept
     {
-        int maxC = 0, secondC = 0;
+        std::uint8_t maxC = 0, secondC = 0;
         for (int r = 0; r < 13; ++r)
         {
-            // extract the 4 suit-bits for rank r into the low 4 bits
             std::uint64_t nib = pext(handMask, rankMasks[r]);
-            // hardware popcount of that nibble is your count
-            int c = std::popcount(nib);
+            std::uint8_t c = popCountTable[nib];
             if (c > maxC)
             {
                 secondC = maxC;
@@ -92,21 +108,19 @@ private:
     }
     static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
-        std::uint32_t s0 = static_cast<std::uint32_t>(deckMask & 0x1FFFu);
-        std::uint32_t s1 = static_cast<std::uint32_t>((deckMask >> 13) & 0x1FFFu);
-        std::uint32_t s2 = static_cast<std::uint32_t>((deckMask >> 26) & 0x1FFFu);
-        std::uint32_t s3 = static_cast<std::uint32_t>((deckMask >> 39) & 0x1FFFu);
+        std::uint16_t s0 = static_cast<std::uint16_t>(deckMask & 0x1FFFu);
+        std::uint16_t s1 = static_cast<std::uint16_t>((deckMask >> 13) & 0x1FFFu);
+        std::uint16_t s2 = static_cast<std::uint16_t>((deckMask >> 26) & 0x1FFFu);
+        std::uint16_t s3 = static_cast<std::uint16_t>((deckMask >> 39) & 0x1FFFu);
         // for each suit, if popcount>=5 yield that mask, else zero
-        std::uint32_t f0 = (std::popcount(s0) >= 5) ? s0 : 0;
-        std::uint32_t f1 = (std::popcount(s1) >= 5) ? s1 : 0;
-        std::uint32_t f2 = (std::popcount(s2) >= 5) ? s2 : 0;
-        std::uint32_t f3 = (std::popcount(s3) >= 5) ? s3 : 0;
+        std::uint16_t f0 = flushTable[s0];
+        std::uint16_t f1 = flushTable[s1];
+        std::uint16_t f2 = flushTable[s2];
+        std::uint16_t f3 = flushTable[s3];
         // OR them together; at most one will be nonzero
-        std::uint32_t flushMask = f0 | f1 | f2 | f3;
+        std::uint16_t flushMask = f0 | f1 | f2 | f3;
         bool isFlush = flushMask != 0;
-        std::uint32_t rankMask = isFlush
-                                     ? flushMask
-                                     : (s0 | s1 | s2 | s3);
+        std::uint16_t rankMask = isFlush ? flushMask : (s0 | s1 | s2 | s3);
         return {isFlush, static_cast<Rank>(rankMask)};
     }
     static inline constexpr StraightInfo getStraight(const Rank rankMask) noexcept

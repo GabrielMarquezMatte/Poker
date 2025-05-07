@@ -3,7 +3,7 @@
 
 static void BM_CreateRandom7Cards(benchmark::State &state)
 {
-    pcg64 rng(state.thread_index() + state.iterations());
+    omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());
     for (auto _ : state)
     {
         Deck deck = Deck::createFullDeck();
@@ -15,7 +15,7 @@ BENCHMARK(BM_CreateRandom7Cards);
 
 static void BM_CreateRandom7CardsSequential(benchmark::State &state)
 {
-    pcg64 rng(state.thread_index() + state.iterations());
+    omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());
     for (auto _ : state)
     {
         Deck deck = Deck::createFullDeck();
@@ -31,7 +31,7 @@ BENCHMARK(BM_CreateRandom7CardsSequential);
 
 static void BM_Classification(benchmark::State &state)
 {
-    pcg64 rng(state.thread_index() + state.iterations());
+    omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());
     Deck deck = Deck::createFullDeck();
     Deck cards = deck.popRandomCards(rng, 7);
     for (auto _ : state)
@@ -45,7 +45,7 @@ BENCHMARK(BM_Classification);
 
 static void BM_PlayerWinsRandomGame(benchmark::State& st)
 {
-    pcg64 rng(st.thread_index() + st.iterations());
+    omp::XoroShiro128Plus rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
     Deck allCards = deck.popRandomCards(rng, 7);
     Deck playerCards = allCards.popCards(2);
@@ -61,18 +61,19 @@ BENCHMARK(BM_PlayerWinsRandomGame)->DenseRange(2, 10, 1);
 
 static void BM_ProbabilityOfWinningSequential(benchmark::State& st)
 {
-    pcg64 rng(st.thread_index() + st.iterations());
+    omp::XoroShiro128Plus rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
     Deck allCards = deck.popRandomCards(rng, 7);
     Deck playerCards = allCards.popCards(2);
     Deck tableCards = allCards.popCards(5);
     std::size_t numPlayers = st.range(0);
+    std::size_t numSimulations = st.range(1);
     for (auto _ : st)
     {
-        double probability = probabilityOfWinning(rng, playerCards, tableCards, 100'000, numPlayers);
+        double probability = probabilityOfWinning(rng, playerCards, tableCards, numSimulations, numPlayers);
         benchmark::DoNotOptimize(probability);
     }
 }
-BENCHMARK(BM_ProbabilityOfWinningSequential)->DenseRange(2, 10, 1)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_ProbabilityOfWinningSequential)->Ranges({{2, 8}, {10'000, 1'000'000}})->Unit(benchmark::kMillisecond);
 
 BENCHMARK_MAIN();

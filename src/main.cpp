@@ -83,12 +83,9 @@ int main(int argc, const char **argv)
     }
     std::uint32_t threadCount = std::thread::hardware_concurrency();
     BS::thread_pool pool(threadCount);
-    while (true)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-        std::cout << "Probability of winning: " << probabilityOfWinning(playerDeck, tableDeck, simulations, numPlayers, pool) * 100 << "%\n";
-        auto end = std::chrono::high_resolution_clock::now();
-        std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";
-    }
+    auto start = std::chrono::high_resolution_clock::now();
+    std::cout << "Probability of winning: " << probabilityOfWinning(playerDeck, tableDeck, simulations, numPlayers, pool) * 100 << "%\n";
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Time taken: " << std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(end - start).count() << "ms\n";
     return 0;
 }
