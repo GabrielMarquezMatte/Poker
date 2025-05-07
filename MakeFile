@@ -1,0 +1,4 @@
+configure:
+	CC=clang-19 CXX=clang++-19 cmake .. -DCMAKE_BUILD_TYPE=Release
+build:
+	CC=clang-19 CXX=clang++-19 cmake --build . -j 8

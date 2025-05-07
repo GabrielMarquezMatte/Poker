@@ -20,8 +20,6 @@ endif()
 include(${PROJECT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake)
 find_package(benchmark CONFIG REQUIRED)
 find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
-find_package(Python COMPONENTS Interpreter Development REQUIRED)
-find_package(pybind11 CONFIG REQUIRED)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 add_executable(${PROJECT_NAME} src/main.cpp)

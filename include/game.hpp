@@ -4,7 +4,7 @@
 #include "hand.hpp"
 #include "deck.hpp"
 #include <BS_thread_pool.hpp>
-#include <vector>
+#include <span>
 #include <thread>
 enum class GameResult
 {

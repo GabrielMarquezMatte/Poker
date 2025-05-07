@@ -7,7 +7,6 @@
 TEST(DeckTest, ParsingHand)
 {
     static constexpr Deck parsedDeck = Deck::parseHand("2H 3D 4S 5C 6H");
-    static constexpr Deck parsedDeck2 = Deck::parseHand("2H 2D 2S 2C");
     static constexpr Deck expectedDeck = Deck::createDeck({Card(Suit::Hearts, Rank::Two), Card(Suit::Diamonds, Rank::Three),
                                                            Card(Suit::Spades, Rank::Four), Card(Suit::Clubs, Rank::Five),
                                                            Card(Suit::Hearts, Rank::Six)});

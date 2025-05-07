@@ -175,11 +175,11 @@ public:
         }
         std::uint64_t mask = static_cast<std::uint64_t>(m_cardsBitmask);
         std::uint64_t resultMask = 0;
-        omp::FastUniformIntDistribution<std::size_t> dist;
+        omp::FastUniformIntDistribution<std::uint8_t> dist;
         for (std::size_t i = 0; i < count; ++i)
         {
             std::size_t remaining = std::popcount(mask);
-            std::size_t index = dist(rng, decltype(dist)::param_type(0, remaining - 1));
+            std::uint8_t index = dist(rng, decltype(dist)::param_type(0, remaining - 1));
             std::uint64_t bit = pdep(1ULL << index, mask);
             resultMask |= bit;
             mask &= ~bit;
