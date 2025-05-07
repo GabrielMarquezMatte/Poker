@@ -9,7 +9,7 @@
 struct Deck
 {
 private:
-    std::int64_t m_cardsBitmask;
+    std::uint64_t m_cardsBitmask;
     static constexpr std::array<Card, 52> m_deck = []()
     {
         std::array<Card, 52> deck;
@@ -57,19 +57,19 @@ private:
 public:
     struct DeckIterator
     {
-        std::int64_t m_mask;
-        inline constexpr DeckIterator(std::int64_t mask) noexcept : m_mask(mask) {}
+        std::uint64_t m_mask;
+        inline constexpr DeckIterator(std::uint64_t mask) noexcept : m_mask(mask) {}
         inline constexpr bool operator!=(const DeckIterator &other) const noexcept
         {
             return m_mask != other.m_mask;
         }
         inline constexpr Card operator*() const noexcept
         {
-            return calculateCardFromMask(m_mask & -m_mask);
+            return calculateCardFromMask(m_mask & -static_cast<std::int64_t>(m_mask));
         }
         inline constexpr DeckIterator &operator++() noexcept
         {
-            m_mask &= ~(m_mask & -m_mask);
+            m_mask &= ~(m_mask & -static_cast<std::int64_t>(m_mask));
             return *this;
         }
     };
@@ -173,7 +173,7 @@ public:
             m_cardsBitmask = 0;
             return all;
         }
-        std::uint64_t mask = static_cast<std::uint64_t>(m_cardsBitmask);
+        std::uint64_t mask = m_cardsBitmask;
         std::uint64_t resultMask = 0;
         omp::FastUniformIntDistribution<std::uint8_t> dist;
         for (std::size_t i = 0; i < count; ++i)
@@ -191,16 +191,16 @@ public:
     }
     inline Card popRandomCard(omp::XoroShiro128Plus &rng)
     {
-        std::int64_t tmp = m_cardsBitmask;
-        omp::FastUniformIntDistribution<std::size_t> dist(0, std::popcount(static_cast<std::uint64_t>(tmp)) - 1);
+        std::uint64_t tmp = m_cardsBitmask;
+        omp::FastUniformIntDistribution<std::size_t> dist(0, std::popcount(tmp) - 1);
         std::uint64_t bit = pdep(1ULL << dist(rng), tmp);
         m_cardsBitmask &= ~bit;
         return calculateCardFromMask(bit);
     }
     inline constexpr Card popCard() noexcept
     {
-        std::int64_t tmp = m_cardsBitmask;
-        std::int64_t bit = tmp & -tmp;
+        std::uint64_t tmp = m_cardsBitmask;
+        std::uint64_t bit = tmp & -static_cast<std::int64_t>(tmp);
         m_cardsBitmask &= ~bit;
         return calculateCardFromMask(bit);
     }
