@@ -87,7 +87,7 @@ namespace omp
             std::uint64_t res = ((std::uint64_t)((std::uint32_t)mBuffer & MASK) * params.diff()) >> tBits;
             mBuffer >>= tBits;
             --mBufferUsesLeft;
-            return params.min + res;
+            return static_cast<T>(params.min + res);
         }
         template <class TRng>
         inline constexpr T operator()(TRng &rng)

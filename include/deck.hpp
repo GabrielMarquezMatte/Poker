@@ -178,8 +178,8 @@ public:
         omp::FastUniformIntDistribution<std::uint8_t> dist;
         for (std::size_t i = 0; i < count; ++i)
         {
-            std::size_t remaining = std::popcount(mask);
-            std::uint8_t index = dist(rng, decltype(dist)::param_type(0, remaining - 1));
+            int remaining = std::popcount(mask);
+            std::uint8_t index = dist(rng, decltype(dist)::param_type(0, static_cast<std::uint8_t>(remaining - 1)));
             std::uint64_t bit = pdep(1ULL << index, mask);
             resultMask |= bit;
             mask &= ~bit;
