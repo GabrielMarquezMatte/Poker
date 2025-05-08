@@ -1,7 +1,6 @@
 #ifndef __POKER_DECK_HPP__
 #define __POKER_DECK_HPP__
 #include <array>
-#include <span>
 #include <random>
 #include <immintrin.h>
 #include "card.hpp"

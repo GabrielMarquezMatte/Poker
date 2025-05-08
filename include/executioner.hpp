@@ -1,0 +1,3 @@
+#ifndef __POKER_EXECUTIONER_HPP__
+#define __POKER_EXECUTIONER_HPP__
+#endif // __POKER_EXECUTIONER_HPP__

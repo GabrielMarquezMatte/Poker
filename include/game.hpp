@@ -34,7 +34,7 @@ inline constexpr GameResult compareHands(const Deck playerCards, const Deck tabl
     }
     return GameResult::Win;
 }
-constexpr bool playerWinsRandomGame(omp::XoroShiro128Plus &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
+bool playerWinsRandomGame(omp::XoroShiro128Plus &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
 {
     Deck deck = Deck::createFullDeck();
     deck.removeCards(playerCards);
