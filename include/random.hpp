@@ -79,14 +79,12 @@ namespace omp
         inline constexpr T operator()(TRng &rng, const param_type &params)
         {
             static_assert(sizeof(typename TRng::result_type) == sizeof(uint64_t), "64-bit RNG required.");
-            if (mBufferUsesLeft == 0)
-            {
-                mBuffer = rng();
-                mBufferUsesLeft = sizeof(mBuffer) * CHAR_BIT / tBits;
-            }
+            constexpr std::uint64_t fullCount = sizeof(mBuffer) * CHAR_BIT / tBits;
+            bool doRefill = mBufferUsesLeft == 0;
+            mBufferUsesLeft = (doRefill ? fullCount : mBufferUsesLeft) - 1;
+            mBuffer = doRefill ? rng() : mBuffer;
             std::uint64_t res = ((std::uint64_t)((std::uint32_t)mBuffer & MASK) * params.diff()) >> tBits;
             mBuffer >>= tBits;
-            --mBufferUsesLeft;
             return static_cast<T>(params.min + res);
         }
         template <class TRng>
