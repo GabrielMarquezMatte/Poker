@@ -24,6 +24,8 @@ find_path(BSHOSHANY_THREAD_POOL_INCLUDE_DIRS "BS_thread_pool.hpp")
 add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 add_executable(${PROJECT_NAME} src/main.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
+add_executable(${PROJECT_NAME}_Game src/game.cpp)
+target_include_directories(${PROJECT_NAME}_Game PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})
 
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_include_directories(${PROJECT_NAME}_Benchmark PRIVATE ${BSHOSHANY_THREAD_POOL_INCLUDE_DIRS})

@@ -14,8 +14,7 @@ enum class Action
     Fold,
     Call,
     Raise,
-    AllIn,
     Check,
-    Bet
+    AllIn,
 };
 #endif // __POKER_ENUMS_HPP__
