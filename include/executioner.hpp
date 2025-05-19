@@ -87,7 +87,6 @@ class ConsoleExecutioner
 public:
     Action getAction(const Player &player, const Table &table, const GameState)
     {
-        std::cout << "Player cards: " << player.getCards() << ". Table cards: " << table.getTableCards() << "\n";
         std::cout << "Player " << player.getChips() << " chips. Current bet: " << table.getCurrentBet() << "\n";
         std::cout << "Choose action (0: Fold, 1: Call, 2: Raise, 3: Check, 4: AllIn): ";
         int choice;
@@ -144,7 +143,7 @@ private:
     struct GamePlayer
     {
         bool isActive = true;
-        Player player;
+        Player* player;
         std::variant<RandomExecutioner, ConsoleExecutioner> executioner;
     };
     GameState m_gameState;
@@ -189,7 +188,7 @@ private:
             {
                 continue;
             }
-            ClassificationResult result = Hand::classify(Deck::createDeck({player.getCards(), m_table.getTableCards()}));
+            ClassificationResult result = Hand::classify(Deck::createDeck({player->getCards(), m_table.getTableCards()}));
             results.push_back({result, i});
         }
         std::sort(results.begin(), results.end(), [](const Result &a, const Result &b)
@@ -200,7 +199,7 @@ private:
         float share = m_table.getPot() / winners;
         for (std::size_t i = 0; i < winners; ++i)
         {
-            m_players[results[i].index].player.addChips(share);
+            m_players[results[i].index].player->addChips(share);
         }
     }
     inline constexpr void resetGame() noexcept
@@ -212,10 +211,10 @@ private:
 
 public:
     constexpr Game() : m_gameState(GameState::PreFlop), m_table() {}
-    inline constexpr void addPlayer(const Player &player, const std::variant<RandomExecutioner, ConsoleExecutioner> &executioner)
+    inline constexpr void addPlayer(Player *player, const std::variant<RandomExecutioner, ConsoleExecutioner> &executioner)
     {
-        assert(player.getCards().size() == 2 && "Player must have 2 cards");
-        assert(player.getChips() > 0 && "Player must have chips");
+        assert(player->getCards().size() == 2 && "Player must have 2 cards");
+        assert(player->getChips() > 0 && "Player must have chips");
         m_players.push_back({true, player, executioner});
     }
     inline constexpr void addCards(const Deck cards)
@@ -242,7 +241,7 @@ public:
                 continue;
             }
             Action action = std::visit([&](auto &exec)
-                                       { return exec.getAction(player, m_table, m_gameState); }, executioner);
+                                       { return exec.getAction(*player, m_table, m_gameState); }, executioner);
             if (action == Action::Fold)
             {
                 isActive = false;
@@ -250,10 +249,10 @@ public:
                 continue;
             }
             float betAmount = std::visit([&](auto &exec)
-                                         { return exec.getBetAmount(player, m_table, m_gameState, action); }, executioner);
+                                         { return exec.getBetAmount(*player, m_table, m_gameState, action); }, executioner);
             if (betAmount > 0)
             {
-                player.removeChips(betAmount);
+                player->removeChips(betAmount);
                 m_table.addToPot(betAmount);
             }
             betIndex++;

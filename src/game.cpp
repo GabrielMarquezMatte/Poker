@@ -12,8 +12,14 @@ int main()
     Player player(playerCards, 1000.0f);
     Player bot(botCards, 1000.0f);
     Game game;
-    game.addPlayer(player, ConsoleExecutioner());
-    game.addPlayer(bot, RandomExecutioner(randomEngine));
+    game.addPlayer(&player, ConsoleExecutioner());
+    game.addPlayer(&bot, RandomExecutioner(randomEngine));
     game.addCards(tableCards);
-    while(game.playRound());
+    std::cout << "Player cards: " << player.getCards() << ". Table cards: " << tableCards << "\n";
+    std::cout << "Probability of winning: " << probabilityOfWinning(playerCards, tableCards, 100'000, 8, 2) << "\n";
+    while (game.playRound())
+        ;
+    std::cout << "Game over!\n";
+    std::cout << "Player chips: " << player.getChips() << '\n';
+    std::cout << "Bot chips: " << bot.getChips() << '\n';
 }
