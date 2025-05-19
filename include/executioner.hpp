@@ -236,6 +236,11 @@ public:
         while (betIndex < numPlayers)
         {
             auto &[isActive, player, executioner] = m_players[betIndex];
+            if (!isActive)
+            {
+                betIndex++;
+                continue;
+            }
             Action action = std::visit([&](auto &exec)
                                        { return exec.getAction(player, m_table, m_gameState); }, executioner);
             if (action == Action::Fold)
