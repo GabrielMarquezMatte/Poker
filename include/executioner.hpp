@@ -16,9 +16,16 @@ struct BetSizes
     float currentBet;
 };
 
-template <typename T>
-concept IExecutioner = requires(T t, const Player &player, const GameState gameState, const Action action, const BetSizes& betSizes)
+struct GamePlayer
 {
+    bool isActive = true;
+    float contribution = 0.0f;
+    Player *player;
+    std::variant<RandomExecutioner, ConsoleExecutioner> executioner;
+};
+
+template <typename T>
+concept IExecutioner = requires(T t, const GamePlayer &player, const GameState gameState, const Action action, const BetSizes &betSizes) {
     { t.getAction(player, gameState, betSizes) } -> std::same_as<Action>;
     { t.getBetAmount(player, gameState, action, betSizes) } -> std::same_as<float>;
 };
@@ -29,9 +36,9 @@ private:
     omp::XoroShiro128Plus m_random;
     omp::FastUniformIntDistribution<int> m_distribution{0, 1};
     std::uniform_real_distribution<float> m_realDist{0.0f, 1.0f};
-    Action chooseAction(const Player &player, const Action defaultAction, bool isCalling, const BetSizes& betSizes)
+    Action chooseAction(const GamePlayer &player, const Action defaultAction, bool isCalling, const BetSizes &betSizes)
     {
-        if (player.getChips() == 0)
+        if (player.player->getChips() == 0)
         {
             return defaultAction;
         }
@@ -40,8 +47,8 @@ private:
         {
             return defaultAction;
         }
-        float toCall = betSizes.currentBet - player.getContribution();
-        if (player.getChips() < toCall)
+        float toCall = betSizes.currentBet - player.contribution;
+        if (player.player->getChips() < toCall)
         {
             return Action::AllIn;
         }
@@ -59,7 +66,7 @@ private:
 
 public:
     RandomExecutioner(const omp::XoroShiro128Plus &random) noexcept : m_random(random) {}
-    Action getAction(const Player &player, const GameState, const BetSizes& betSizes)
+    Action getAction(const GamePlayer &player, const GameState, const BetSizes &betSizes)
     {
         if (betSizes.currentBet == 0)
         {
@@ -67,7 +74,7 @@ public:
         }
         return chooseAction(player, Action::Call, true, betSizes);
     }
-    float getBetAmount(const Player &player, const GameState, const Action action, const BetSizes& betSizes)
+    float getBetAmount(const GamePlayer &player, const GameState, const Action action, const BetSizes &betSizes)
     {
         switch (action)
         {
@@ -75,11 +82,11 @@ public:
         case Action::Check:
             return 0.0f;
         case Action::Call:
-            return betSizes.currentBet - player.getContribution();
+            return betSizes.currentBet - player.contribution;
         case Action::Raise:
-            return m_realDist(m_random) * player.getChips();
+            return m_realDist(m_random) * player.player->getChips();
         case Action::AllIn:
-            return player.getChips();
+            return player.player->getChips();
         default:
             return 0.0f;
         }
@@ -90,9 +97,9 @@ static_assert(IExecutioner<RandomExecutioner>);
 class ConsoleExecutioner
 {
 public:
-    Action getAction(const Player &player, const GameState, const BetSizes& betSizes)
+    Action getAction(const GamePlayer &player, const GameState, const BetSizes &betSizes)
     {
-        std::cout << "Player " << player.getChips() << " chips. Current bet: " << betSizes.currentBet << "\n";
+        std::cout << "Player " << player.player->getChips() << " chips. Current bet: " << betSizes.currentBet << "\n";
         std::cout << "Choose action (0: Fold, 1: Call, 2: Raise, 3: Check, 4: AllIn): ";
         int choice;
         std::cin >> choice;
@@ -112,7 +119,7 @@ public:
             return Action::Fold;
         }
     }
-    float getBetAmount(const Player &player, const GameState gameState, const Action action, const BetSizes& betSizes)
+    float getBetAmount(const GamePlayer &player, const GameState gameState, const Action action, const BetSizes &betSizes)
     {
         switch (action)
         {
@@ -120,15 +127,15 @@ public:
         case Action::Check:
             return 0.0f;
         case Action::AllIn:
-            return player.getChips();
+            return player.player->getChips();
         case Action::Call:
-            return std::min(betSizes.currentBet, player.getChips());
+            return std::min(betSizes.currentBet, player.player->getChips());
         case Action::Raise:
         {
             std::cout << "Enter raise amount (min: " << betSizes.minBet << "): ";
             float amount;
             std::cin >> amount;
-            if (amount < betSizes.minBet || amount > player.getChips())
+            if (amount < betSizes.minBet || amount > player.player->getChips())
             {
                 std::cout << "Invalid raise amount. Trying again.\n";
                 return getBetAmount(player, gameState, action, betSizes);
@@ -145,11 +152,10 @@ static_assert(IExecutioner<ConsoleExecutioner>);
 class Game
 {
 private:
-    struct GamePlayer
+    struct Result
     {
-        bool isActive = true;
-        Player *player;
-        std::variant<RandomExecutioner, ConsoleExecutioner> executioner;
+        ClassificationResult res;
+        std::size_t idx;
     };
     GameState m_gameState;
     Table m_table;
@@ -160,34 +166,40 @@ private:
     static constexpr float bigBlind = 0.02f;
     inline constexpr void changeGameState() noexcept
     {
-        switch (m_gameState)
+        m_gameState = m_gameState == GameState::End ? GameState::PreFlop : static_cast<GameState>(static_cast<int>(m_gameState) + 1);
+    }
+    void processPot(Pot &pot, std::span<Result> results)
+    {
+        auto players = pot.getPlayers();
+        std::vector<Result> potResults;
+        potResults.reserve(players.size());
+        for (auto const &result : results)
         {
-        case GameState::PreFlop:
-            m_gameState = GameState::Flop;
-            break;
-        case GameState::Flop:
-            m_gameState = GameState::Turn;
-            break;
-        case GameState::Turn:
-            m_gameState = GameState::River;
-            break;
-        case GameState::River:
-            m_gameState = GameState::Showdown;
-            break;
-        case GameState::Showdown:
-            m_gameState = GameState::End;
-            break;
-        default:
-            break;
+            auto it = std::find(players.begin(), players.end(), m_players[result.idx].player);
+            if (it != players.end())
+            {
+                potResults.push_back(result);
+            }
+        }
+        if (potResults.empty())
+        {
+            return;
+        }
+        auto bestInPot = std::max_element(potResults.begin(), potResults.end(), [](const Result &a, const Result &b)
+                                          { return a.res < b.res; })->res;
+        auto numWinners = std::count_if(potResults.begin(), potResults.end(), [&](const Result &result)
+                                        { return result.res == bestInPot; });
+        float share = pot.getAmount() / numWinners;
+        for (auto &result : potResults)
+        {
+            if (result.res == bestInPot)
+            {
+                m_players[result.idx].player->addChips(share);
+            }
         }
     }
     void finishGame()
     {
-        struct Result
-        {
-            ClassificationResult res;
-            std::size_t idx;
-        };
         std::vector<Result> results;
         results.reserve(m_players.size());
         for (std::size_t i = 0; i < m_players.size(); ++i)
@@ -204,17 +216,35 @@ private:
         {
             return;
         }
-        std::sort(results.begin(), results.end(), [](auto const &a, auto const &b)
-                  { return a.res > b.res; });
-        auto best = results[0].res;
-        auto winners = std::count_if(results.begin(), results.end(), [&](auto const &r)
-                                     { return r.res == best; });
-        float share = m_table.getPot() / winners;
-        for (auto const &r : results)
+        for (auto &pot : m_table.getPots())
         {
-            if (r.res == best)
+            auto players = pot.getPlayers();
+            std::vector<Result> potResults;
+            potResults.reserve(players.size());
+            for (auto const &result : results)
             {
-                m_players[r.idx].player->addChips(share);
+                auto it = std::find(players.begin(), players.end(), m_players[result.idx].player);
+                if (it != players.end())
+                {
+                    potResults.push_back(result);
+                }
+            }
+            if (potResults.empty())
+            {
+                continue;
+            }
+            auto bestInPot = std::max_element(potResults.begin(), potResults.end(), [](const Result &a, const Result &b)
+                                              { return a.res < b.res; })
+                                 ->res;
+            auto numWinners = std::count_if(potResults.begin(), potResults.end(), [&](const Result &result)
+                                            { return result.res == bestInPot; });
+            float share = pot.getAmount() / numWinners;
+            for (auto &result : potResults)
+            {
+                if (result.res == bestInPot)
+                {
+                    m_players[result.idx].player->addChips(share);
+                }
             }
         }
     }
@@ -225,7 +255,7 @@ private:
         for (auto &player : m_players)
         {
             player.isActive = true;
-            player.player->setContribution(0.0f);
+            player.contribution = 0.0f;
         }
     }
     inline constexpr void postBlinds()
@@ -234,17 +264,18 @@ private:
         std::size_t bb = (m_dealerIndex + 2) % m_players.size();
         m_players[sb].player->removeChips(smallBlind);
         m_players[bb].player->removeChips(bigBlind);
-        m_table.addToPot(smallBlind);
-        m_table.addToPot(bigBlind);
+        auto &firstPot = m_table.getPots().back();
+        firstPot.addAmount(smallBlind);
+        firstPot.addAmount(bigBlind);
     }
     inline constexpr float getHighestBet() const
     {
         float highestBet = 0.0f;
-        for (const auto &[isActive, player, executioner] : m_players)
+        for (const auto &[isActive, contribution, player, executioner] : m_players)
         {
-            if (isActive && player->getContribution() > highestBet)
+            if (isActive && contribution > highestBet)
             {
-                highestBet = player->getContribution();
+                highestBet = contribution;
             }
         }
         return highestBet;
@@ -252,7 +283,8 @@ private:
     inline constexpr void removeFromPlayer(GamePlayer &gp, float amount)
     {
         gp.player->removeChips(amount);
-        m_table.addToPot(amount);
+        gp.contribution += amount;
+        m_table.getPots().back().addAmount(amount);
     }
     inline constexpr void prepareRound()
     {
@@ -275,11 +307,11 @@ private:
                 actor = (actor + 1) % n;
                 continue;
             }
-            float toCall = highestBet - gp.player->getContribution();
+            float toCall = highestBet - gp.contribution;
             Action action = std::visit([&](auto &e)
-                                       { return e.getAction(*gp.player, m_gameState, m_betSizes); }, gp.executioner);
+                                       { return e.getAction(gp, m_gameState, m_betSizes); }, gp.executioner);
             float betAmount = std::visit([&](auto &e)
-                                         { return e.getBetAmount(*gp.player, m_gameState, action, m_betSizes); }, gp.executioner);
+                                         { return e.getBetAmount(gp, m_gameState, action, m_betSizes); }, gp.executioner);
 
             switch (action)
             {
@@ -297,7 +329,7 @@ private:
             {
                 float raiseAmt = std::max(betAmount, toCall + smallBlind);
                 removeFromPlayer(gp, raiseAmt);
-                highestBet = gp.player->getContribution();
+                highestBet = gp.contribution;
                 lastToAct = (actor + n - 1) % n;
                 break;
             }
@@ -306,9 +338,9 @@ private:
             {
                 float allInAmt = gp.player->getChips();
                 removeFromPlayer(gp, allInAmt);
-                if (gp.player->getContribution() > highestBet)
+                if (gp.contribution > highestBet)
                 {
-                    highestBet = gp.player->getContribution();
+                    highestBet = gp.contribution;
                     lastToAct = (actor + n - 1) % n;
                 }
                 break;
@@ -330,7 +362,21 @@ public:
     {
         assert(player->getCards().size() == 2 && "Player must have 2 cards");
         assert(player->getChips() > 0 && "Player must have chips");
-        m_players.push_back({true, player, std::move(executioner)});
+        m_players.push_back({true, 0.0f, player, std::move(executioner)});
+    }
+    inline constexpr void initializePots()
+    {
+        m_table.addPot(0.0f, {});
+        auto pots = m_table.getPots();
+        for (auto &player : m_players)
+        {
+            player.contribution = 0.0f;
+            player.isActive = true;
+            for (auto &pot : pots)
+            {
+                pot.addPlayer(player.player);
+            }
+        }
     }
     inline constexpr void addCards(const Deck cards)
     {
