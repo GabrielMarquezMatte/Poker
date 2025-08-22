@@ -1,0 +1,11 @@
+[requires]
+gtest/1.16.0
+benchmark/1.9.4
+bshoshany-thread-pool/5.0.0
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[layout]
+cmake_layout
