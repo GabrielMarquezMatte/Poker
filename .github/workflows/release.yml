@@ -67,7 +67,6 @@ jobs:
       - name: Conan install deps
         run: >-
           conan install .
-          --output-folder=build
           --build=missing
           -s build_type=Release
           -s compiler.cppstd=23
@@ -76,7 +75,7 @@ jobs:
       - name: Configure (CMake)
         run: >-
           cmake -S . -B build
-          -DCMAKE_TOOLCHAIN_FILE=generators/conan_toolchain.cmake
+          -DCMAKE_TOOLCHAIN_FILE="build/generators/conan_toolchain.cmake"
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
