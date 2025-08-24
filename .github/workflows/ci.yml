@@ -55,6 +55,18 @@ jobs:
       - name: Clean build directory
         shell: bash
         run: rm -rf build
+      
+      - name: Compute parallel jobs
+        shell: bash
+        run: |
+          J=$(python - <<'PY'
+          import multiprocessing,os
+          print(min(8, max(2, multiprocessing.cpu_count())))  # cap to avoid thrashing
+          PY
+          )
+          echo "JOBS=$J" >> "$GITHUB_ENV"
+          echo "CMAKE_BUILD_PARALLEL_LEVEL=$J" >> "$GITHUB_ENV"
+          echo "CONAN_CPU_COUNT=$J" >> "$GITHUB_ENV"
 
       - name: Conan install deps
         run: >-
@@ -62,10 +74,13 @@ jobs:
           --output-folder=build
           --build=missing
           -s build_type=${{ matrix.build_type }}
+          -s compiler.cppstd=23
+          -c tools.build:jobs=${{ env.JOBS }}
+          -c core.download:parallel=${{ env.JOBS }}
 
       - name: Configure (CMake)
         run: >-
-          cmake -S . -B build -G Ninja
+          cmake -S . -B build
           -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
