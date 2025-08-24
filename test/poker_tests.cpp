@@ -160,6 +160,30 @@ TEST(ClassificationTest, classifyPlayerBestOfSeven)
     static constexpr ClassificationResult expected = ClassificationResult(Classification::Flush, Rank::King | Rank::Queen | Rank::Four | Rank::Three | Rank::Two);
     static_assert(res == expected, "Expected best hand to be a King-high Flush");
 }
+TEST(ClassificationTest, TestTwoPairBreakdown)
+{
+    static constexpr Deck hand = Deck::parseHand("qd tc");
+    static constexpr Deck board = Deck::parseHand("9d 9c 8h Kh Qh");
+    static constexpr Deck firstOpponent = Deck::parseHand("kd 2c");
+    static constexpr Deck secondOpponent = Deck::parseHand("qc 2d");
+    static constexpr Deck thirdOpponent = Deck::parseHand("ac qc");
+    static constexpr Deck fourthOpponent = Deck::parseHand("jd tc");
+    static constexpr Deck fifthOpponent = Deck::parseHand("8c 8d");
+    static constexpr Deck sixthOpponent = Deck::parseHand("ad ac");
+    static constexpr ClassificationResult mainClassification = Hand::classify(Deck::createDeck({hand, board}));
+    static constexpr ClassificationResult res1 = Hand::classify(Deck::createDeck({firstOpponent, board}));
+    static constexpr ClassificationResult res2 = Hand::classify(Deck::createDeck({secondOpponent, board}));
+    static constexpr ClassificationResult res3 = Hand::classify(Deck::createDeck({thirdOpponent, board}));
+    static constexpr ClassificationResult res4 = Hand::classify(Deck::createDeck({fourthOpponent, board}));
+    static constexpr ClassificationResult res5 = Hand::classify(Deck::createDeck({fifthOpponent, board}));
+    static constexpr ClassificationResult res6 = Hand::classify(Deck::createDeck({sixthOpponent, board}));
+    static_assert(mainClassification == res1, "Expected tie with first opponent");
+    static_assert(mainClassification == res2, "Expected tie with second opponent");
+    static_assert(mainClassification < res3, "Expected tie with third opponent");
+    static_assert(mainClassification < res4, "Expected tie with fourth opponent");
+    static_assert(mainClassification < res5, "Expected tie with fifth opponent");
+    static_assert(mainClassification < res6, "Expected tie with sixth opponent");
+}
 TEST(DeckTest, ParseInvalidFormat)
 {
     static_assert(Deck::parseHand("ZZ XX 11").size() == 0, "Expected empty deck from invalid hand format");
@@ -188,8 +212,8 @@ TEST(ClassificationTest, OnePairKickerComparison)
 // 7) Two-Pair kicker comparison: AA QQ K beats AA JJ K
 TEST(ClassificationTest, TwoPairKickerComparison)
 {
-    static constexpr ClassificationResult twoPairQHigh = ClassificationResult(Classification::TwoPair,Rank::Ace | Rank::Queen | Rank::King);
-    static constexpr ClassificationResult twoPairJHigh = ClassificationResult(Classification::TwoPair,Rank::Ace | Rank::Jack | Rank::King);
+    static constexpr ClassificationResult twoPairQHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Queen | Rank::King);
+    static constexpr ClassificationResult twoPairJHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Jack | Rank::King);
     static_assert(twoPairQHigh > twoPairJHigh, "Two Pair with Queen kicker should beat Two Pair with Jack kicker");
 }
 
@@ -216,30 +240,73 @@ TEST(GameTest, CheckUniqueCards)
     static constexpr Deck p = Deck::createDeck({Card(Suit::Hearts, Rank::Ace)});
     static constexpr Deck t1 = Deck::createDeck({Card(Suit::Hearts, Rank::Ace)});
     static constexpr Deck t2 = Deck::createDeck({Card(Suit::Hearts, Rank::King)});
-    static constexpr auto checkUniqueCards = [](const Deck &playerCards, const Deck &tableCards) {
+    static constexpr auto checkUniqueCards = [](const Deck &playerCards, const Deck &tableCards)
+    {
         return (playerCards.getMask() & tableCards.getMask()) == 0;
     };
     static_assert(checkUniqueCards(p, t1) == false, "Expected duplicate cards in hand and table");
     static_assert(checkUniqueCards(p, t2) == true, "Expected no duplicate cards in hand and table");
 }
 
-TEST(DeckTest, RemoveAndAddCards) {
+TEST(GameCompareTest, PlayerWinsBeatsLowerOpponent)
+{
+    static constexpr Deck player = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Clubs, Rank::Ace)});
+    static constexpr Deck opp = Deck::createDeck({Card(Suit::Hearts, Rank::King), Card(Suit::Clubs, Rank::King)});
+    static constexpr Deck board = Deck::createDeck({Card(Suit::Spades, Rank::Two), Card(Suit::Diamonds, Rank::Three),
+                                                    Card(Suit::Spades, Rank::Four), Card(Suit::Diamonds, Rank::Five),
+                                                    Card(Suit::Clubs, Rank::Nine)});
+    static constexpr std::array<Deck, 1> opps{opp};
+    static constexpr auto res = compareHands(player, board, opps);
+    static_assert(res == GameResult::Win);
+}
+
+TEST(GameCompareTest, PlayerLosesToHigherOpponent)
+{
+    static constexpr Deck player = Deck::createDeck({Card(Suit::Hearts, Rank::King), Card(Suit::Clubs, Rank::King)});
+    static constexpr Deck opp = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Clubs, Rank::Ace)});
+    static constexpr Deck board = Deck::createDeck({Card(Suit::Spades, Rank::Two), Card(Suit::Diamonds, Rank::Three),
+                                                    Card(Suit::Spades, Rank::Four), Card(Suit::Diamonds, Rank::Five),
+                                                    Card(Suit::Clubs, Rank::Nine)});
+    static constexpr std::array<Deck, 1> opps{opp};
+    static constexpr auto res = compareHands(player, board, opps);
+    static_assert(res == GameResult::Lose);
+}
+
+TEST(GameCompareTest, PlayerTiesWithSameBestHand)
+{
+    // Both have same hole cards ranks but different suits; board makes the same two pair from board + kickers
+    static constexpr Deck player = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Spades, Rank::King)});
+    static constexpr Deck opp = Deck::createDeck({Card(Suit::Diamonds, Rank::Ace), Card(Suit::Clubs, Rank::King)});
+    // Board pairs A and K with equal kickers such that both best 5 are identical
+    static constexpr Deck board = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Diamonds, Rank::King),
+                                                    Card(Suit::Clubs, Rank::Queen), Card(Suit::Spades, Rank::Jack),
+                                                    Card(Suit::Hearts, Rank::Ten)});
+    static constexpr std::array<Deck, 1> opps{opp};
+    static constexpr auto res = compareHands(player, board, opps);
+    static_assert(res == GameResult::Tie);
+}
+
+TEST(DeckTest, RemoveAndAddCards)
+{
     static constexpr Deck full = Deck::createFullDeck();
     static_assert(full.size() == 52, "Expected full deck size of 52");
-    static constexpr Deck firstTestDeck = [] {
+    static constexpr Deck firstTestDeck = []
+    {
         Deck deck = Deck::createFullDeck();
         deck.removeCard(Card(Suit::Spades, Rank::Ten));
         return deck;
     }();
     static_assert(firstTestDeck.size() == 51, "Expected deck size of 51 after removing one card");
-    static constexpr Deck secondTestDeck = [] {
+    static constexpr Deck secondTestDeck = []
+    {
         Deck deck = Deck::createFullDeck();
         deck.removeCard(Card(Suit::Spades, Rank::Ten));
         deck.removeCard(Card(Suit::Clubs, Rank::Five));
         return deck;
     }();
     static_assert(secondTestDeck.size() == 50, "Expected deck size of 50 after removing two cards");
-    static constexpr Deck thirdTestDeck = [] {
+    static constexpr Deck thirdTestDeck = []
+    {
         Deck deck = Deck::createFullDeck();
         deck.removeCard(Card(Suit::Spades, Rank::Ten));
         deck.removeCard(Card(Suit::Clubs, Rank::Five));
@@ -247,7 +314,8 @@ TEST(DeckTest, RemoveAndAddCards) {
         return deck;
     }();
     static_assert(thirdTestDeck.size() == 51, "Expected deck size of 51 after removing two cards and adding one card");
-    static constexpr Deck fourthTestDeck = [] {
+    static constexpr Deck fourthTestDeck = []
+    {
         Deck deck = Deck::createFullDeck();
         deck.removeCard(Card(Suit::Spades, Rank::Ten));
         deck.removeCard(Card(Suit::Clubs, Rank::Five));
@@ -256,4 +324,46 @@ TEST(DeckTest, RemoveAndAddCards) {
         return deck;
     }();
     static_assert(fourthTestDeck.size() == 52, "Expected deck size of 52 after removing two cards and adding two cards");
+}
+
+TEST(DeckTest, PopRandomCards)
+{
+    static constexpr Deck fullDeck = Deck::createFullDeck();
+    static constexpr Deck emptyDeck = Deck::emptyDeck();
+    {
+        static constexpr Deck popped = []
+        {
+            Deck deck = fullDeck;
+            omp::XoroShiro128Plus rng{124};
+            return deck.popRandomCards(rng, 5);
+        }();
+        static constexpr std::size_t remaining = []
+        {
+            Deck deck = fullDeck;
+            omp::XoroShiro128Plus rng{124};
+            deck.popRandomCards(rng, 5);
+            return deck.size();
+        }();
+        static constexpr Deck expectedDeck = Deck::parseHand("8d tc Jc 2s Js");
+        static_assert(popped.size() == 5, "Expected 5 cards to be popped");
+        static_assert(remaining == 47, "Expected 47 cards to remain in the deck");
+        static_assert(popped == expectedDeck);
+    }
+    {
+        static constexpr Deck popped = []
+        {
+            Deck deck = emptyDeck;
+            omp::XoroShiro128Plus rng{123};
+            return deck.popRandomCards(rng, 5);
+        }();
+        static constexpr std::size_t remaining = []
+        {
+            Deck deck = emptyDeck;
+            omp::XoroShiro128Plus rng{123};
+            deck.popRandomCards(rng, 5);
+            return deck.size();
+        }();
+        static_assert(popped.size() == 0, "Expected 0 cards to be popped");
+        static_assert(remaining == 0, "Expected 0 cards to remain in the deck");
+    }
 }

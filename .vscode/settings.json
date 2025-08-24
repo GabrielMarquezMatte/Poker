@@ -120,6 +120,8 @@
         "slist": "cpp",
         "generator": "cpp",
         "text_encoding": "cpp",
-        "cassert": "cpp"
+        "cassert": "cpp",
+        "execution": "cpp",
+        "strstream": "cpp"
     }
 }

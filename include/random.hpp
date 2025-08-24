@@ -4,8 +4,16 @@
 #include <cstdint>
 #include <climits>
 #include <bit>
+#include <array>
 namespace omp
 {
+    static inline constexpr std::uint64_t splitmix64(std::uint64_t &x)
+    {
+        std::uint64_t z = (x += 0x9E3779B97F4A7C15ull);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+        return z ^ (z >> 31);
+    }
     // Fast 64-bit PRNG with a period of 2^128-1.
     class XoroShiro128Plus
     {
@@ -14,7 +22,9 @@ namespace omp
 
         constexpr XoroShiro128Plus(std::uint64_t seed)
         {
-            mState[0] = ~(mState[1] = seed);
+            std::uint64_t tmp = seed;
+            mState[0] = splitmix64(tmp);
+            mState[1] = splitmix64(tmp);
         }
 
         constexpr inline std::uint64_t operator()()
@@ -39,65 +49,52 @@ namespace omp
         }
 
     private:
-
-        std::uint64_t mState[2];
+        std::array<std::uint64_t, 2> mState;
     };
 
     // Simple and fast uniform int distribution for small ranges. Has a bias similar to the classic modulo
     // method, but it's good enough for most poker simulations.
-    template <typename T = unsigned, unsigned tBits = 21> // 64 / 3
+    template <typename T = unsigned, unsigned tBits = 21>
     class FastUniformIntDistribution
     {
+        static_assert(tBits > 0 && tBits <= 32, "tBits must be 1..32 for this buffer logic");
+
     public:
         struct param_type
         {
-            T min;
-            T max;
-            constexpr param_type() : min(0), max(0) {}
-            constexpr param_type(T min, T max) : min(min), max(max) {}
-            inline constexpr T diff() const
-            {
-                return max - min + 1;
-            }
+            T min{}, max{};
+            constexpr T diff() const { return max - min + 1; }
         };
-        typedef T TUnsigned;
-        constexpr FastUniformIntDistribution()
+        constexpr FastUniformIntDistribution() { init(0, 1); }
+        constexpr FastUniformIntDistribution(T min, T max) { init(min, max); }
+        constexpr void init(T min, T max)
         {
-            init(0, 1);
-        }
-        constexpr FastUniformIntDistribution(T min, T max)
-        {
-            init(min, max);
-        }
-        inline constexpr void init(T min, T max)
-        {
-            mParams = param_type(min, max);
+            mParams = {min, max};
             mBuffer = 0;
-            mBufferUsesLeft = 0;
+            mUsesLeft = 0;
         }
         template <class TRng>
-        inline constexpr T operator()(TRng &rng, const param_type &params)
+        inline constexpr T operator()(TRng &rng, const param_type &p)
         {
-            static_assert(sizeof(typename TRng::result_type) == sizeof(uint64_t), "64-bit RNG required.");
-            constexpr std::uint64_t fullCount = sizeof(mBuffer) * CHAR_BIT / tBits;
-            bool doRefill = mBufferUsesLeft == 0;
-            mBufferUsesLeft = (doRefill ? fullCount : mBufferUsesLeft) - 1;
-            mBuffer = doRefill ? rng() : mBuffer;
-            std::uint64_t res = ((std::uint64_t)((std::uint32_t)mBuffer & MASK) * params.diff()) >> tBits;
-            mBuffer >>= tBits;
-            return static_cast<T>(params.min + res);
+            static_assert(sizeof(typename TRng::result_type) == sizeof(std::uint64_t), "Need 64-bit RNG");
+            constexpr std::uint32_t chunks = 64 / tBits;
+            if (mUsesLeft == 0)
+            {
+                mBuffer = rng();
+                mUsesLeft = chunks;
+            }
+            std::uint64_t slice = mBuffer >> (64 - tBits);
+            mBuffer <<= tBits;
+            --mUsesLeft;
+            std::uint64_t r = (slice * std::uint64_t(p.diff())) >> tBits;
+            return T(p.min + r);
         }
         template <class TRng>
-        inline constexpr T operator()(TRng &rng)
-        {
-            return operator()(rng, mParams);
-        }
-
+        inline constexpr T operator()(TRng &rng) { return operator()(rng, mParams); }
     private:
-        static constexpr std::uint32_t MASK = (1u << tBits) - 1;
-        std::uint64_t mBuffer;
-        std::uint32_t mBufferUsesLeft;
-        param_type mParams;
+        std::uint64_t mBuffer{};
+        std::uint32_t mUsesLeft{};
+        param_type mParams{};
     };
 }
 

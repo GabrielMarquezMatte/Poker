@@ -4,6 +4,6 @@
         "conan": {}
     },
     "include": [
-        "out/build/VisualStudio/conan/build/generators/CMakePresets.json"
+        "build/generators/CMakePresets.json"
     ]
 }

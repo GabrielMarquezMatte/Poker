@@ -28,13 +28,16 @@ public:
     {
         return m_players;
     }
+    inline constexpr bool containsPlayer(Player* player) const noexcept
+    {
+        return std::find(m_players.begin(), m_players.end(), player) != m_players.end();
+    }
 };
 class Table
 {
 private:
-    Deck m_tableCards;
     std::vector<Pot> m_pots;
-
+    Deck m_tableCards;
 public:
     constexpr Table() noexcept : m_tableCards(Deck::emptyDeck()), m_pots() {}
     inline constexpr Deck getTableCards() const noexcept { return m_tableCards; }
@@ -44,9 +47,9 @@ public:
         assert(m_tableCards.size() + cards.size() <= 5 && "Final size must be lower or equal to 5");
         m_tableCards.addCards(cards);
     }
-    inline constexpr void addPot(float amount, std::vector<Player*> players) noexcept
+    inline constexpr Pot& addPot(float amount, std::vector<Player*> players) noexcept
     {
-        m_pots.emplace_back(amount, players);
+        return m_pots.emplace_back(amount, players);
     }
     inline constexpr void resetTable() noexcept
     {

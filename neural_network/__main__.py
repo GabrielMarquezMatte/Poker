@@ -73,6 +73,7 @@ class PokerEnv(gym.Env):
         self.action_space = spaces.Discrete(3)
         # Raise a fixed fraction of your starting stack
         self.raise_amount = starting_stack * 0.1
+        self.equity_data : dict[int, float] = {}
 
         # Observation includes equity too
         self.observation_space = spaces.Dict({
@@ -124,14 +125,18 @@ class PokerEnv(gym.Env):
             "stack":     np.array([me.stack], dtype=np.float32),
             "pot":       np.array([self.pot],  dtype=np.float32),
         }
-        # equity estimation (optional)
-        eq = probability_of_winning(
-            me.hand,
-            self.community,
-            self.equity_sims,
-            self.n_players,
-            self.thread_pool
-        )
+        key = me.hand.mask | self.community.mask
+        if key not in self.equity_data:
+            # compute equity for the first time
+            self.equity_data[key] = probability_of_winning(
+                me.hand,
+                self.community,
+                self.equity_sims,
+                self.n_players,
+                self.thread_pool
+            )
+        # use cached equity value
+        eq = self.equity_data[key]
         obs["equity"] = np.array([eq], dtype=np.float32)
         return obs
 

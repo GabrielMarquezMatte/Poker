@@ -17,7 +17,7 @@ private:
         {
             for (int rank = 0; rank < 13; ++rank)
             {
-                deck[index++] = Card(static_cast<Suit>(1 << suit), static_cast<Rank>(1 << rank));
+                deck[index++] = Card(static_cast<Suit>(1ull << suit), static_cast<Rank>(1ull << rank));
             }
         }
         return deck;
@@ -53,6 +53,9 @@ private:
         return res;
     }
 
+    constexpr explicit Deck(std::uint64_t mask) : m_cardsBitmask(mask) {}
+    static inline constexpr Deck from_mask(std::uint64_t m) noexcept { return Deck(m); }
+
 public:
     struct DeckIterator
     {
@@ -72,58 +75,55 @@ public:
             return *this;
         }
     };
+    inline constexpr Deck() = default;
     static inline constexpr Deck createFullDeck() noexcept
     {
-        Deck deck;
-        deck.m_cardsBitmask = 0xFFFFFFFFFFFFF;
-        return deck;
+        return Deck::from_mask((1ull << 52ull) - 1ull);
     }
     static inline constexpr Deck emptyDeck() noexcept
     {
-        Deck deck;
-        deck.m_cardsBitmask = 0;
-        return deck;
+        return Deck::from_mask(0);
     }
     static inline constexpr Deck createDeck(const std::initializer_list<Deck> decks) noexcept
     {
-        Deck deck = Deck::emptyDeck();
-        for (const Deck d : decks)
+        std::uint64_t mask = 0;
+        for (const Deck& d : decks)
         {
-            deck.m_cardsBitmask |= d.m_cardsBitmask;
+            mask |= d.m_cardsBitmask;
         }
-        return deck;
+        return Deck::from_mask(mask);
     }
     static inline constexpr Deck createDeck(const std::vector<Deck> &decks) noexcept
     {
-        Deck deck = Deck::emptyDeck();
-        for (const Deck d : decks)
+        std::uint64_t mask = 0;
+        for (const Deck& d : decks)
         {
-            deck.m_cardsBitmask |= d.m_cardsBitmask;
+            mask |= d.m_cardsBitmask;
         }
-        return deck;
+        return Deck::from_mask(mask);
     }
     static inline constexpr Deck createDeck(const std::initializer_list<Card> cards) noexcept
     {
-        Deck deck = Deck::emptyDeck();
-        for (const Card card : cards)
+        std::uint64_t mask = 0;
+        for (const Card& card : cards)
         {
-            deck.addCard(card);
+            mask |= Deck::calculateCardMask(card);
         }
-        return deck;
+        return Deck::from_mask(mask);
     }
     static inline constexpr Deck createDeck(const std::vector<Card> &cards) noexcept
     {
-        Deck deck = Deck::emptyDeck();
-        for (const Card card : cards)
+        std::uint64_t mask = 0;
+        for (const Card& card : cards)
         {
-            deck.addCard(card);
+            mask |= Deck::calculateCardMask(card);
         }
-        return deck;
+        return Deck::from_mask(mask);
     }
     static inline constexpr Deck parseHand(const std::string_view str) noexcept
     {
         // Split from spaces
-        Deck deck = Deck::emptyDeck();
+        std::uint64_t mask = 0;
         std::size_t start = 0;
         std::size_t end = str.find(' ', start);
         while (end != std::string_view::npos)
@@ -131,7 +131,7 @@ public:
             auto card = Card::parseCard(str.substr(start, end - start));
             if (card.has_value())
             {
-                deck.addCard(card.value());
+                mask |= Deck::calculateCardMask(card.value());
             }
             start = end + 1;
             end = str.find(' ', start);
@@ -139,11 +139,11 @@ public:
         auto card = Card::parseCard(str.substr(start, end - start));
         if (card.has_value())
         {
-            deck.addCard(card.value());
+            mask |= Deck::calculateCardMask(card.value());
         }
-        return deck;
+        return Deck::from_mask(mask);
     }
-    inline constexpr std::int64_t getMask() const noexcept
+    inline constexpr std::uint64_t getMask() const noexcept
     {
         return m_cardsBitmask;
     }
@@ -163,7 +163,8 @@ public:
     {
         m_cardsBitmask &= ~calculateCardMask(card);
     }
-    inline constexpr Deck popRandomCards(omp::XoroShiro128Plus &rng, std::size_t count) noexcept
+    template<typename TRng>
+    inline constexpr Deck popRandomCards(TRng &rng, std::size_t count) noexcept
     {
         const std::size_t total = size();
         if (count >= total)
@@ -172,23 +173,31 @@ public:
             m_cardsBitmask = 0;
             return all;
         }
+        const bool choose_complement = (count > (total >> 1));
+        std::size_t k = choose_complement ? (total - count) : count;
         std::uint64_t mask = m_cardsBitmask;
-        std::uint64_t resultMask = 0;
+        std::uint64_t chosen = 0;
         omp::FastUniformIntDistribution<std::uint8_t> dist;
-        for (std::size_t i = 0; i < count; ++i)
+        std::size_t remaining = total;
+        for (std::size_t i = 0; i < k; ++i, --remaining)
         {
-            int remaining = std::popcount(mask);
-            std::uint8_t index = dist(rng, decltype(dist)::param_type(0, static_cast<std::uint8_t>(remaining - 1)));
-            std::uint64_t bit = pdep(1ULL << index, mask);
-            resultMask |= bit;
+            std::uint8_t idx = dist(rng, {0, static_cast<std::uint8_t>(remaining - 1)});
+            std::uint64_t bit = pdep(1ull << idx, mask);
+            chosen |= bit;
             mask &= ~bit;
         }
-        Deck result = Deck::emptyDeck();
-        result.m_cardsBitmask = resultMask;
-        m_cardsBitmask &= ~resultMask;
-        return result;
+        if (choose_complement)
+        {
+            Deck out = Deck::from_mask(m_cardsBitmask & ~chosen);
+            m_cardsBitmask = chosen;
+            return out;
+        }
+        Deck out = Deck::from_mask(chosen);
+        m_cardsBitmask = m_cardsBitmask & ~chosen;
+        return out;
     }
-    inline Card popRandomCard(omp::XoroShiro128Plus &rng)
+    template<typename TRng>
+    inline Card popRandomCard(TRng &rng)
     {
         std::uint64_t tmp = m_cardsBitmask;
         omp::FastUniformIntDistribution<std::size_t> dist(0, std::popcount(tmp) - 1);
@@ -215,9 +224,7 @@ public:
         std::uint64_t indexMask = (1ull << count) - 1;
         std::uint64_t resultMask = pdep(indexMask, m_cardsBitmask);
         m_cardsBitmask &= ~resultMask;
-        Deck result = Deck::emptyDeck();
-        result.m_cardsBitmask = resultMask;
-        return result;
+        return Deck::from_mask(resultMask);
     }
     inline constexpr std::optional<Card> at(std::size_t index) const noexcept
     {

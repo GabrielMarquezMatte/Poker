@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <array>
 #include <ostream>
-enum class Suit
+enum class Suit : std::uint8_t
 {
     Hearts = 1 << 0,
     Diamonds = 1 << 1,
@@ -30,7 +30,7 @@ enum class Rank
     LowStraight = Two | Three | Four | Five | Ace,
     HighStraight = Ten | Jack | Queen | King | Ace,
 };
-enum class Classification
+enum class Classification : std::uint16_t
 {
     HighCard = 1 << 0,
     Pair = 1 << 1,
@@ -45,43 +45,43 @@ enum class Classification
 };
 inline constexpr Rank operator|(Rank lhs, Rank rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) | static_cast<std::uint32_t>(rhs));
 }
 inline constexpr Rank operator&(Rank lhs, Rank rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs));
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) & static_cast<std::uint32_t>(rhs));
 }
 inline constexpr Rank operator^(Rank lhs, Rank rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) ^ static_cast<uint32_t>(rhs));
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) ^ static_cast<std::uint32_t>(rhs));
 }
 inline constexpr Rank operator~(Rank lhs) noexcept
 {
-    return static_cast<Rank>(~static_cast<uint32_t>(lhs));
+    return static_cast<Rank>(~static_cast<std::uint32_t>(lhs));
 }
-inline constexpr Rank operator>>(Rank lhs, uint32_t rhs) noexcept
+inline constexpr Rank operator>>(Rank lhs, std::uint32_t rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) >> rhs);
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) >> rhs);
 }
-inline constexpr Rank operator<<(Rank lhs, uint32_t rhs) noexcept
+inline constexpr Rank operator<<(Rank lhs, std::uint32_t rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) << rhs);
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) << rhs);
 }
-inline constexpr Rank operator-(Rank lhs, uint32_t rhs) noexcept
+inline constexpr Rank operator-(Rank lhs, std::uint32_t rhs) noexcept
 {
-    return static_cast<Rank>(static_cast<uint32_t>(lhs) - rhs);
+    return static_cast<Rank>(static_cast<std::uint32_t>(lhs) - rhs);
 }
 inline constexpr std::size_t getRankIndex(Rank rank) noexcept
 {
-    return std::countr_zero(static_cast<uint32_t>(rank));
+    return std::countr_zero(static_cast<std::uint32_t>(rank));
 }
 inline constexpr std::size_t getSuitIndex(Suit suit) noexcept
 {
-    return std::countr_zero(static_cast<uint32_t>(suit));
+    return std::countr_zero(static_cast<std::uint8_t>(suit));
 }
 inline constexpr std::size_t getClassificationIndex(Classification classification) noexcept
 {
-    return std::countr_zero(static_cast<uint32_t>(classification));
+    return std::countr_zero(static_cast<std::uint32_t>(classification));
 }
 
 inline std::ostream &operator<<(std::ostream &os, const Suit suit)

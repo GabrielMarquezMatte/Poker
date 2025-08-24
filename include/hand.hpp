@@ -12,11 +12,11 @@ private:
     struct StraightInfo
     {
         bool isStraight;
-        Rank highCard; // valid only if isStraight==true
+        Rank highCard;
     };
     static constexpr std::array<StraightInfo, 1 << 13> straightTable = []()
     {
-        std::array<StraightInfo, 1 << 13> tbl{}; // 13 ranks ⇒ 2^13 possible masks
+        std::array<StraightInfo, 1 << 13> tbl{};
 
         constexpr std::uint32_t lowStraight = static_cast<std::uint32_t>(Rank::LowStraight);
 
@@ -30,10 +30,9 @@ private:
             std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
             if (!run5)
             {
-                tbl[m] = {false, Rank::Two}; // highCard unused
+                tbl[m] = {false, Rank::Two};
                 continue;
             }
-            // highest set bit in run5 is the straight’s top card
             int high = std::bit_width(run5) - 1;
             tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
         }
@@ -44,7 +43,6 @@ private:
         std::array<std::uint64_t, 13> m{};
         for (std::size_t r = 0; r < 13; ++r)
         {
-            // suit offsets: 0,13,26,39
             m[r] = (1ULL << (r + 0 * 13)) | (1ULL << (r + 1 * 13)) | (1ULL << (r + 2 * 13)) | (1ULL << (r + 3 * 13));
         }
         return m;
@@ -66,6 +64,47 @@ private:
             table[i] = static_cast<std::uint8_t>(std::popcount(i));
         }
         return table;
+    }();
+    static constexpr std::array<std::uint16_t, 8192> hiTable = []()
+    {
+        std::array<std::uint16_t, 8192> table{};
+        for (std::uint16_t v = 0; v < 8192; ++v)
+        {
+            std::uint16_t m = 0;
+            for (int r = 12; r >= 0; --r)
+            {
+                if (v & (std::uint16_t(1u) << r))
+                {
+                    m = std::uint16_t(1u) << r;
+                    break;
+                }
+            }
+            table[v] = m;
+        }
+        return table;
+    }();
+    static constexpr std::array<std::uint16_t, 8192> top2Table = []()
+    {
+        std::array<std::uint16_t, 8192> t{};
+        for (std::uint16_t v = 0; v < 8192; ++v)
+        {
+            std::uint16_t m = 0;
+            int count = 0;
+            for (int r = 12; r >= 0; --r)
+            {
+                if (!(v & (std::uint16_t(1u) << r)))
+                {
+                    continue;
+                }
+                m |= std::uint16_t(1u) << r;
+                if (++count == 2)
+                {
+                    break;
+                }
+            }
+            t[v] = m;
+        }
+        return t;
     }();
     static inline constexpr std::uint64_t pext(std::uint64_t x, std::uint64_t mask) noexcept
     {
@@ -108,24 +147,35 @@ private:
     }
     static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
-        std::uint16_t s0 = static_cast<std::uint16_t>(deckMask & 0x1FFFu);
-        std::uint16_t s1 = static_cast<std::uint16_t>((deckMask >> 13) & 0x1FFFu);
-        std::uint16_t s2 = static_cast<std::uint16_t>((deckMask >> 26) & 0x1FFFu);
-        std::uint16_t s3 = static_cast<std::uint16_t>((deckMask >> 39) & 0x1FFFu);
-        // for each suit, if popcount>=5 yield that mask, else zero
-        std::uint16_t f0 = flushTable[s0];
-        std::uint16_t f1 = flushTable[s1];
-        std::uint16_t f2 = flushTable[s2];
-        std::uint16_t f3 = flushTable[s3];
-        // OR them together; at most one will be nonzero
-        std::uint16_t flushMask = f0 | f1 | f2 | f3;
-        bool isFlush = flushMask != 0;
-        std::uint16_t rankMask = isFlush ? flushMask : (s0 | s1 | s2 | s3);
+        const std::uint16_t s0 = static_cast<std::uint16_t>(deckMask & 0x1FFFu);
+        const std::uint16_t s1 = static_cast<std::uint16_t>((deckMask >> 13) & 0x1FFFu);
+        const std::uint16_t s2 = static_cast<std::uint16_t>((deckMask >> 26) & 0x1FFFu);
+        const std::uint16_t s3 = static_cast<std::uint16_t>((deckMask >> 39) & 0x1FFFu);
+        const std::uint16_t f0 = flushTable[s0];
+        const std::uint16_t f1 = flushTable[s1];
+        const std::uint16_t f2 = flushTable[s2];
+        const std::uint16_t f3 = flushTable[s3];
+        const std::uint16_t flushMask = f0 | f1 | f2 | f3;
+        const bool isFlush = flushMask != 0;
+        const std::uint16_t rankMask = isFlush ? flushMask : (s0 | s1 | s2 | s3);
         return {isFlush, static_cast<Rank>(rankMask)};
     }
     static inline constexpr StraightInfo getStraight(const Rank rankMask) noexcept
     {
-        return straightTable[static_cast<std::uint32_t>(rankMask)];
+        return straightTable[static_cast<std::uint16_t>(rankMask)];
+    }
+    static inline constexpr uint16_t makeTwoPairMask(std::uint64_t deckMask) noexcept
+    {
+        constexpr std::uint64_t RANK_MASK = (1u << 13) - 1;
+        const std::uint16_t a = std::uint16_t((deckMask)&RANK_MASK);
+        const std::uint16_t b = std::uint16_t((deckMask >> 13) & RANK_MASK);
+        const std::uint16_t c = std::uint16_t((deckMask >> 26) & RANK_MASK);
+        const std::uint16_t d = std::uint16_t((deckMask >> 39) & RANK_MASK);
+        const std::uint16_t any = std::uint16_t(a | b | c | d);
+        const std::uint16_t pairs = std::uint16_t((a & b) | (c & d) | ((a ^ b) & (c ^ d)));
+        const std::uint16_t pairBits = top2Table[pairs];
+        const std::uint16_t kickerBit = hiTable[std::uint16_t(any & ~pairBits)];
+        return std::uint16_t(pairBits | kickerBit);
     }
 
 public:
@@ -147,7 +197,7 @@ public:
         {
             return {Classification::FourOfAKind, rankValue};
         }
-        if (maxCount == 3 && secondMaxCount >= 2)
+        if (maxCount == 3 && secondMaxCount == 2)
         {
             return {Classification::FullHouse, rankValue};
         }
@@ -169,7 +219,8 @@ public:
         }
         if (secondMaxCount == 2)
         {
-            return {Classification::TwoPair, rankValue};
+            std::uint16_t twoPairMask = makeTwoPairMask(deckMask);
+            return {Classification::TwoPair, static_cast<Rank>(twoPairMask)};
         }
         return {Classification::Pair, rankValue};
     }

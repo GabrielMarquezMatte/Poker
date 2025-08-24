@@ -12,12 +12,15 @@ int main()
     Player player(playerCards, 1000.0f);
     Player bot(botCards, 1000.0f);
     Game game;
-    game.addPlayer(&player, ConsoleExecutioner());
-    game.addPlayer(&bot, RandomExecutioner(randomEngine));
+    game.addPlayer(std::make_unique<ConsoleExecutioner>(), &player);
+    game.addPlayer(std::make_unique<RandomExecutioner>(randomEngine), &bot);
     game.addCards(tableCards);
     std::cout << "Player cards: " << player.getCards() << ". Table cards: " << tableCards << "\n";
-    std::cout << "Probability of winning: " << probabilityOfWinning(playerCards, tableCards, 100'000, 8, 2) << "\n";
-    while (game.playRound())
+    BS::thread_pool<BS::tp::none> threadPool(std::thread::hardware_concurrency());
+    std::cout << "Probability of winning: " << probabilityOfWinning(playerCards, tableCards, 100'000, 2, threadPool) << "\n";
+    static constexpr float smallBlind = 0.1f;
+    static constexpr float bigBlind = 0.2f;
+    while (game.playRound(smallBlind, bigBlind))
         ;
     std::cout << "Game over!\n";
     std::cout << "Player chips: " << player.getChips() << '\n';
