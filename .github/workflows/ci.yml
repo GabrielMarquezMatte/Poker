@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ master, main, develop, feature/** ]
+    branches: [ master, main, develop, 'feature/**' ]
   pull_request:
     branches: [ '**' ]
   workflow_dispatch:
@@ -32,10 +32,10 @@ jobs:
         with:
           python-version: '3.x'
 
-    - name: Cache Conan (v2)
+      - name: Cache Conan (v2)
         uses: actions/cache@v4
         with:
-      path: .conan2
+          path: ${{ env.CONAN_HOME }}
           key: ${{ runner.os }}-conan2-${{ hashFiles('conanfile.*') }}
           restore-keys: |
             ${{ runner.os }}-conan2-
