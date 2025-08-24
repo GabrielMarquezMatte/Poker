@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-release:
+    permissions:
+      contents: write
+    name: ${{ matrix.os }} • Release
+    runs-on: ${{ matrix.os }}
+    env:
+      CONAN_HOME: ${{ github.workspace }}/.conan2
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+    - name: Cache Conan (v2)
+        uses: actions/cache@v4
+        with:
+      path: .conan2
+          key: ${{ runner.os }}-conan2-${{ hashFiles('conanfile.*') }}
+          restore-keys: |
+            ${{ runner.os }}-conan2-
+
+      - name: Install build tools (pip)
+        run: |
+          python -m pip install --upgrade pip
+          pip install 'cmake>=3.31' 'conan>=2.2' ninja
+
+      - name: Enable MSVC dev environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Detect Conan profile
+        run: conan profile detect --force
+
+      - name: Clean build directory
+        shell: bash
+        run: rm -rf build
+
+      - name: Conan install deps
+        run: >-
+          conan install .
+          --output-folder=build
+          --build=missing
+          -s build_type=Release
+
+      - name: Configure (CMake)
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            7z a dist/Poker-windows-x64.zip build/*.exe || true
+            7z a dist/Poker-windows-x64.zip build/**/Release/*.exe || true
+          else
+            tar -czf dist/Poker-linux-x64.tar.gz -C build .
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
