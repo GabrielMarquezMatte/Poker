@@ -10,7 +10,7 @@ private:
     omp::XoroShiro128Plus m_random;
     omp::FastUniformIntDistribution<int> m_distribution{0, 1};
     std::uniform_real_distribution<float> m_realDist{0.0f, 1.0f};
-    Action chooseAction(const Player *player, const Action defaultAction, bool isCalling, const BetSizes &betSizes, float contribution)
+    ActionType chooseAction(const Player *player, const ActionType defaultAction, bool isCalling, const BetSizes &betSizes, float contribution)
     {
         if (player->getChips() == 0)
         {
@@ -24,42 +24,42 @@ private:
         float toCall = betSizes.currentBet - contribution;
         if (player->getChips() < toCall)
         {
-            return Action::AllIn;
+            return ActionType::AllIn;
         }
         if (!isCalling)
         {
-            return Action::Raise;
+            return ActionType::Raise;
         }
         bool shouldRaise = m_distribution(m_random) == 0;
         if (!shouldRaise)
         {
-            return Action::Call;
+            return ActionType::Call;
         }
-        return Action::Raise;
+        return ActionType::Raise;
     }
 
 public:
     RandomExecutioner(const omp::XoroShiro128Plus &random) noexcept : m_random(random) {}
-    Action getAction(const Player *player, const GameState, const BetSizes &betSizes, float contribution) override
+    ActionType getAction(const Player *player, const GameState, const BetSizes &betSizes, float contribution) override
     {
         if (betSizes.currentBet == 0)
         {
-            return chooseAction(player, Action::Check, false, betSizes, contribution);
+            return chooseAction(player, ActionType::Check, false, betSizes, contribution);
         }
-        return chooseAction(player, Action::Call, true, betSizes, contribution);
+        return chooseAction(player, ActionType::Call, true, betSizes, contribution);
     }
-    float getBetAmount(const Player *player, const GameState, const Action action, const BetSizes &betSizes, float contribution) override
+    float getBetAmount(const Player *player, const GameState, const ActionType action, const BetSizes &betSizes, float contribution) override
     {
         switch (action)
         {
-        case Action::Fold:
-        case Action::Check:
+        case ActionType::Fold:
+        case ActionType::Check:
             return 0.0f;
-        case Action::Call:
+        case ActionType::Call:
             return betSizes.currentBet - contribution;
-        case Action::Raise:
+        case ActionType::Raise:
             return m_realDist(m_random) * player->getChips();
-        case Action::AllIn:
+        case ActionType::AllIn:
             return player->getChips();
         default:
             return 0.0f;

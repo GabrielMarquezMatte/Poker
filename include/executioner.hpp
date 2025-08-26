@@ -110,17 +110,17 @@ private:
             }
             float contribution = m_potManager.getContribution(gp.player);
             float toCall = highestBet - contribution;
-            Action action = gp.executioner->getAction(gp.player, m_gameState, m_betSizes, contribution);
+            ActionType action = gp.executioner->getAction(gp.player, m_gameState, m_betSizes, contribution);
             float betAmount = gp.executioner->getBetAmount(gp.player, m_gameState, action, m_betSizes, contribution);
 
             switch (action)
             {
-            case Action::Fold:
+            case ActionType::Fold:
                 gp.isActive = false;
                 --activeCount;
                 break;
 
-            case Action::Call:
+            case ActionType::Call:
                 betAmount = std::min(betAmount, toCall);
                 if (betAmount > 0)
                 {
@@ -128,7 +128,7 @@ private:
                 }
                 break;
 
-            case Action::Raise:
+            case ActionType::Raise:
             {
                 float raiseAmt = std::max(betAmount, toCall + smallBlind);
                 m_potManager.collectBets(m_table, gp.player, raiseAmt);
@@ -137,7 +137,7 @@ private:
                 break;
             }
 
-            case Action::AllIn:
+            case ActionType::AllIn:
             {
                 float allInAmt = gp.player->getChips();
                 m_potManager.collectBets(m_table, gp.player, allInAmt);

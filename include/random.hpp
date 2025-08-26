@@ -38,6 +38,12 @@ namespace omp
             return result;
         }
 
+        inline constexpr void seed(std::uint64_t s)
+        {
+            mState[0] = splitmix64(s);
+            mState[1] = splitmix64(s);
+        }
+
         static constexpr inline std::uint64_t min()
         {
             return 0;
