@@ -33,8 +33,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE bshoshany-thread-pool::bshoshany-t
 add_executable(${PROJECT_NAME}_Game src/game.cpp)
 target_link_libraries(${PROJECT_NAME}_Game PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
 
-add_executable(${PROJECT_NAME}_Test src/test.cpp)
-target_link_libraries(${PROJECT_NAME}_Test PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
-
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)

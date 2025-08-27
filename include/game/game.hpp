@@ -1,32 +1,11 @@
-#include "../include/card.hpp"
-#include "../include/deck.hpp"
-#include "../include/classification_result.hpp"
-#include "../include/hand.hpp"
-#include "../include/random.hpp"
-#include "../include/poker_enums.hpp"
-#include "../include/game.hpp"
-struct ActionStruct
-{
-    ActionType type;
-    int amount = 0;
-};
-struct Player
-{
-    int id = 0;
-    int chips = 0;
-    bool folded = false;
-    bool all_in = false;
-    int committed = 0;
-    Deck hole{};
-    bool has_hole = false;
-    inline constexpr bool eligible() const noexcept { return !folded && !all_in; }
-    inline constexpr bool alive() const noexcept { return !folded; } // can be all-in but still in the hand
-};
-struct Blinds
-{
-    int smallBlind = 50;
-    int bigBlind = 100;
-};
+#ifndef __POKER_GAME_EXECUTION_HPP__
+#define __POKER_GAME_EXECUTION_HPP__
+#include "player.hpp"
+#include "blinds.hpp"
+#include "poker_enums.hpp"
+#include "../classification_result.hpp"
+#include "../hand.hpp"
+#include <span>
 struct BetData
 {
     int pot = 0;
@@ -292,9 +271,9 @@ private:
 
 public:
     constexpr Game(Blinds blinds) noexcept : m_blinds(blinds), m_playersData{numberOfPlayers()} {}
-    inline constexpr Player &addPlayer(int id, int chips) noexcept
+    inline constexpr Player &addPlayer(int chips) noexcept
     {
-        return m_players.emplace_back(id, chips);
+        return m_players.emplace_back(m_players.size(), chips);
     }
     template <typename TRng>
     inline constexpr void startNewHand(TRng &rng) noexcept
@@ -509,48 +488,4 @@ public:
         return (m_state == GameState::Finished);
     }
 };
-
-#include <iostream>
-
-int main()
-{
-    omp::XoroShiro128Plus rng(std::random_device{}());
-    Blinds blinds{50, 100};
-    Game g(blinds);
-    sizeof(rng);
-    g.addPlayer(0, 10000);
-    g.addPlayer(1, 10000);
-    g.addPlayer(2, 10000);
-    g.startNewHand(rng);
-    BS::thread_pool<BS::tp::none> threadPool{8};
-    while (g.state() != GameState::Finished)
-    {
-        const Player &p = g.currentPlayer();
-        const BetData &bd = g.betData();
-        const Deck &board = g.board();
-        const GameState state = g.state();
-        if (state == GameState::Flop)
-        {
-            std::cerr << "Player " << p.id << " with hand " << p.hole << "is on the flop.\n";
-        }
-        std::cerr << "Street: " << static_cast<int>(g.state()) << ", Player "
-                  << p.id << " to act. Chips: " << p.chips << ", Committed: "
-                  << p.committed << ", Pot: " << bd.pot << ", Current Bet: " 
-                  << bd.currentBet << ", Min Raise: " << bd.minRaise 
-                  << ", Probability of Winning: " << probabilityOfWinning(p.hole, board, 100'000, 3, threadPool) << '\n';
-        ActionStruct a{ActionType::Check, 0};
-        if (bd.currentBet > p.committed)
-        {
-            a = {ActionType::Call, 0};
-        }
-        if (g.applyAction(rng, a))
-        {
-            break;
-        }
-    }
-    for (const Player &p : g.players())
-    {
-        std::cerr << "Player " << p.id << ": Chips: " << p.chips << ", Committed: " << p.committed << "\n";
-    }
-    return 0;
-}
+#endif // __POKER_GAME_HPP__
