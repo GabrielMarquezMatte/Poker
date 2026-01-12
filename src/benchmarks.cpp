@@ -51,9 +51,12 @@ static void BM_PlayerWinsRandomGame(benchmark::State& st)
     Deck playerCards = allCards.popCards(2);
     Deck tableCards = allCards.popCards(5);
     std::size_t numPlayers = st.range(0);
+    Deck deckForGame = Deck::createFullDeck();
+    deckForGame.removeCards(playerCards);
+    deckForGame.removeCards(tableCards);
     for (auto _ : st)
     {
-        bool result = playerWinsRandomGame(rng, playerCards, tableCards, numPlayers);
+        bool result = playerWinsRandomGame(rng, playerCards, tableCards, deckForGame, numPlayers);
         benchmark::DoNotOptimize(result);
     }
 }

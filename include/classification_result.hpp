@@ -7,28 +7,22 @@ private:
     std::uint32_t m_mask;
 public:
     inline constexpr ClassificationResult() noexcept = default;
-    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) noexcept : m_mask(static_cast<std::uint32_t>(classification) | static_cast<std::uint32_t>(rankFlag << 10)) {}
+    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) noexcept : m_mask((static_cast<std::uint32_t>(classification) << 13) | static_cast<std::uint32_t>(rankFlag)) {}
     inline constexpr Classification getClassification() const noexcept
     {
-        return static_cast<Classification>(m_mask & 0x3FF);
+        return static_cast<Classification>(m_mask >> 13);
     }
     inline constexpr Rank getRankFlag() const noexcept
     {
-        return static_cast<Rank>(m_mask >> 10);
+        return static_cast<Rank>(m_mask & 0x1FFF);
     }
     inline constexpr bool operator<(const ClassificationResult &other) const noexcept
     {
-        Classification classification = getClassification();
-        Classification otherClassification = other.getClassification();
-        if (classification != otherClassification)
-        {
-            return classification < otherClassification;
-        }
-        return getRankFlag() < other.getRankFlag();
+        return m_mask < other.m_mask;
     }
     inline constexpr bool operator==(const ClassificationResult &other) const noexcept
     {
-        return getClassification() == other.getClassification() && getRankFlag() == other.getRankFlag();
+        return m_mask == other.m_mask;
     }
     inline constexpr bool operator!=(const ClassificationResult &other) const noexcept
     {

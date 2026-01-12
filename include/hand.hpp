@@ -22,19 +22,19 @@ private:
 
         for (std::uint32_t m = 0; m < tbl.size(); ++m)
         {
-            if (m == lowStraight)
+            std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
+            if (run5)
+            {
+                int high = std::bit_width(run5) - 1;
+                tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
+                continue;
+            }
+            if ((m & lowStraight) == lowStraight)
             {
                 tbl[m] = {true, Rank::Five};
                 continue;
             }
-            std::uint32_t run5 = m & (m >> 1) & (m >> 2) & (m >> 3) & (m >> 4);
-            if (!run5)
-            {
-                tbl[m] = {false, Rank::Two};
-                continue;
-            }
-            int high = std::bit_width(run5) - 1;
-            tbl[m] = {true, static_cast<Rank>(Rank::Two << (high + 4))};
+            tbl[m] = {false, Rank::Two};
         }
         return tbl;
     }();
@@ -186,7 +186,7 @@ public:
         auto [straight, highRank] = getStraight(rankValue);
         if (straight && flush)
         {
-            if (rankValue == Rank::HighStraight)
+            if (highRank == Rank::Ace)
             {
                 return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
             }

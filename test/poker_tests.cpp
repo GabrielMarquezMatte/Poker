@@ -367,3 +367,45 @@ TEST(DeckTest, PopRandomCards)
         static_assert(remaining == 0, "Expected 0 cards to remain in the deck");
     }
 }
+
+TEST(BugReproduction, StaticAssert_WheelStraightWithKickers)
+{
+    // Bug: Wheel Straight (A-2-3-4-5) com Kickers
+    // Se a lógica falhar, o compilador emitirá erro aqui.
+    static constexpr Deck hand = Deck::parseHand("2c 3d 4h 5s ac 9d kd");
+    static constexpr ClassificationResult result = Hand::classify(hand);
+    
+    static_assert(result == ClassificationResult(Classification::Straight, Rank::Five), 
+        "FALHA DE COMPILACAO: Nao detetou Wheel Straight (A-5) quando existem kickers (9, K).");
+}
+
+TEST(BugReproduction, StaticAssert_RoyalFlushWithExtraSuitedCard)
+{
+    // Bug: Royal Flush com carta extra do mesmo naipe (9s)
+    // Se a lógica falhar (classificar como Straight Flush), a compilação para.
+    static constexpr Deck hand = Deck::parseHand("as ks qs js ts 9s 2c");
+    static constexpr ClassificationResult result = Hand::classify(hand);
+    
+    // Verifica se é estritamente Royal Flush
+    static_assert(result.getClassification() == Classification::RoyalFlush, 
+        "FALHA DE COMPILACAO: Classificou incorretamente Royal Flush 'sujo' como Straight Flush.");
+}
+
+TEST(EdgeCases, StaticAssert_Complex7CardHands)
+{
+    // Caso: 3 Pares no Board -> Deve escolher os 2 maiores (AA, KK) com kicker Q
+    static constexpr Deck threePairHand = Deck::parseHand("as ac ks kc qs qc 2h");
+    static_assert(Hand::classify(threePairHand) == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King | Rank::Queen),
+        "FALHA DE COMPILACAO: Erro ao escolher os melhores 2 pares de 3 possiveis.");
+
+    // Caso: Wheel Straight Flush com Kicker do mesmo naipe
+    static constexpr Deck wheelSFHand = Deck::parseHand("5h 4h 3h 2h ah 9h kd");
+    static_assert(Hand::classify(wheelSFHand) == ClassificationResult(Classification::StraightFlush, Rank::Five),
+        "FALHA DE COMPILACAO: Erro ao detetar Wheel Straight Flush com kicker suited.");
+
+    // Caso: Quads vs Full House (Prioridade)
+    // Board: 5555, Mão: AA. Resultado deve ser Quads (5555 A), nunca Full House.
+    static constexpr Deck quadsHand = Deck::parseHand("5c 5d 5h 5s as ac 2d");
+    static_assert(Hand::classify(quadsHand).getClassification() == Classification::FourOfAKind,
+        "FALHA DE COMPILACAO: Full House foi priorizado indevidamente sobre Four of a Kind.");
+}

@@ -35,11 +35,8 @@ inline constexpr GameResult compareHands(const Deck playerCards, const Deck tabl
     return GameResult::Win;
 }
 template <typename TRng>
-inline bool playerWinsRandomGame(TRng &rng, const Deck playerCards, Deck tableCards, std::size_t numPlayers)
+inline bool playerWinsRandomGame(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers)
 {
-    Deck deck = Deck::createFullDeck();
-    deck.removeCards(playerCards);
-    deck.removeCards(tableCards);
     std::size_t numCardsToDeal = 5 - tableCards.size();
     if (numCardsToDeal)
     {
@@ -61,9 +58,12 @@ template <typename TRng>
 inline constexpr double probabilityOfWinning(TRng &rng, const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
 {
     std::size_t wins = 0;
+    Deck deck = Deck::createFullDeck();
+    deck.removeCards(playerCards);
+    deck.removeCards(tableCards);
     for (std::size_t i = 0; i < numSimulations; ++i)
     {
-        if (playerWinsRandomGame(rng, playerCards, tableCards, numPlayers))
+        if (playerWinsRandomGame(rng, playerCards, tableCards, deck, numPlayers))
         {
             ++wins;
         }
@@ -77,15 +77,19 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
     std::vector<std::future<std::size_t>> threads;
     threads.reserve(numThreads);
     std::size_t remainingSimulations = numSimulations % numThreads;
+    Deck deck = Deck::createFullDeck();
+    deck.removeCards(playerCards);
+    deck.removeCards(tableCards);
     for (std::size_t i = 0; i < numThreads; ++i)
     {
-        threads.push_back(threadPool.submit_task([&, i]()
+        threads.push_back(threadPool.submit_task([&, deck, i]()
                                {
             omp::XoroShiro128Plus threadRng(std::random_device{}());
             std::size_t threadWins = 0;
+            Deck threadDeck = deck;
             for (std::size_t j = 0; j < simulationsPerThread; ++j)
             {
-                if (playerWinsRandomGame(threadRng, playerCards, tableCards, numPlayers))
+                if (playerWinsRandomGame(threadRng, playerCards, tableCards, threadDeck, numPlayers))
                 {
                     ++threadWins;
                 }
@@ -94,9 +98,10 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
     }
     std::size_t wins = 0;
     omp::XoroShiro128Plus threadRng(std::random_device{}());
+    Deck threadDeck = deck;
     for (std::size_t i = 0; i < remainingSimulations; ++i)
     {
-        if (playerWinsRandomGame(threadRng, playerCards, tableCards, numPlayers))
+        if (playerWinsRandomGame(threadRng, playerCards, tableCards, threadDeck, numPlayers))
         {
             ++wins;
         }
