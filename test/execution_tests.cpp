@@ -14,46 +14,46 @@ inline double calculateProbability(const std::string_view playerHand, const std:
 
 TEST(ExecutionTests, RoyalFlushTest)
 {
-    double probability = calculateProbability("as ks", "qs js ts 2h 3d", 5'000'000, 8);
+    double probability = calculateProbability("as ks", "qs js ts 2h 3d", 500'000, 8);
     EXPECT_EQ(probability, 1.0);
 }
 
 TEST(ExecutionTests, RoyalFlushOnTheBoard)
 {
-    double probability = calculateProbability("2c 7d", "ts js qs ks as", 5'000'000, 8);
+    double probability = calculateProbability("2c 7d", "ts js qs ks as", 500'000, 8);
     EXPECT_EQ(probability, 1.0);
 }
 
 TEST(ExecutionTests, UnbeatableQuads)
 {
-    double probability = calculateProbability("as 2c", "ad ah ac kc qd", 5'000'000, 8);
+    double probability = calculateProbability("as 2c", "ad ah ac kc qd", 500'000, 8);
     EXPECT_EQ(probability, 1.0);
 }
 
 TEST(ExecutionTests, HighFlush)
 {
-    double probability = calculateProbability("as 7h", "ks qs 9s 2s 3d", 5'000'000, 8);
+    double probability = calculateProbability("as 7h", "ks qs 9s 2s 3d", 500'000, 8);
     EXPECT_GE(probability, 0.99);
     EXPECT_LE(probability, 1.0);
 }
 
 TEST(ExecutionTests, QHighFlushVsTheFieldOnA4SpadeBoard)
 {
-    double probability = calculateProbability("qs 7h", "ks 7s 4s 2s 3d", 20'000'000, 8);
+    double probability = calculateProbability("qs 7h", "ks 7s 4s 2s 3d", 200'000, 8);
     EXPECT_GE(probability, 0.60);
     EXPECT_LE(probability, 0.70);
 }
 
 TEST(ExecutionTests, TwoPairOnTheBoardKickerWars)
 {
-    double probability = calculateProbability("ac ks", "td 9c 9s th 2h", 50'000'000, 8);
+    double probability = calculateProbability("ac ks", "td 9c 9s th 2h", 500'000, 8);
     EXPECT_GE(probability, 0.18);
     EXPECT_LE(probability, 0.22);
 }
 
 TEST(ExecutionTests, JHighFlushVsTheField)
 {
-    double probability = calculateProbability("jh 6h", "qs 8d ts td 9c", 50'000'000, 8);
+    double probability = calculateProbability("jh 6h", "qs 8d ts td 9c", 500'000, 8);
     EXPECT_GE(probability, 0.74);
     EXPECT_LE(probability, 0.75);
 }

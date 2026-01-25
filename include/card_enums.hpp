@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <array>
 #include <ostream>
+#include <ranges>
 enum class Suit : std::uint8_t
 {
     Hearts = 1 << 0,
@@ -12,7 +13,7 @@ enum class Suit : std::uint8_t
     Clubs = 1 << 2,
     Spades = 1 << 3,
 };
-enum class Rank
+enum class Rank : std::uint32_t
 {
     Two = 1 << 0,
     Three = 1 << 1,

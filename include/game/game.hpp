@@ -3,14 +3,15 @@
 #include "player.hpp"
 #include "blinds.hpp"
 #include "poker_enums.hpp"
+#include "pot_manager.hpp"
 #include "../classification_result.hpp"
 #include "../hand.hpp"
 #include <span>
 struct BetData
 {
-    int pot = 0;
-    int currentBet = 0;
-    int minRaise = 0;
+    std::uint32_t pot = 0;
+    std::uint32_t currentBet = 0;
+    std::uint32_t minRaise = 0;
 };
 struct PlayersData
 {
@@ -52,36 +53,39 @@ private:
 
     inline constexpr std::size_t nextEligibleFrom(std::size_t i) const noexcept
     {
-        for (std::size_t k = 1; k <= numberOfPlayers(); ++k)
+        const std::size_t n = numberOfPlayers();
+        for (std::size_t k = 1; k <= n; ++k)
         {
-            std::size_t idx = (i + k) % numberOfPlayers();
+            std::size_t idx = (i + k) % n;
             if (m_players[idx].eligible())
             {
                 return idx;
             }
         }
-        return numberOfPlayers(); // none
+        return n;
     }
 
     inline constexpr std::size_t nextAliveFrom(std::size_t i) const noexcept
     {
-        for (std::size_t k = 1; k <= numberOfPlayers(); ++k)
+        const std::size_t n = numberOfPlayers();
+        for (std::size_t k = 1; k <= n; ++k)
         {
-            std::size_t idx = (i + k) % numberOfPlayers();
+            std::size_t idx = (i + k) % n;
             if (m_players[idx].alive())
             {
                 return idx;
             }
         }
-        return numberOfPlayers(); // none
+        return n;
     }
 
-    inline constexpr void commit(Player &player, int amount) noexcept
+    inline constexpr void commit(Player &player, std::uint32_t amount) noexcept
     {
-        amount = std::max(0, amount);
-        int pay = std::min(amount, player.chips);
+        amount = std::max(0u, amount);
+        std::uint32_t pay = std::min(amount, player.chips);
         player.chips -= pay;
         player.committed += pay;
+        player.invested += pay;
         m_betData.pot += pay;
         if (player.chips == 0)
         {
@@ -179,31 +183,57 @@ private:
             auto res = Hand::classify(Deck::createDeck({p.hole, table}));
             entries.push_back({i, res});
         }
-        ClassificationResult best{};
-        bool first = true;
-        for (auto const &e : entries)
+        auto pots = PotManager::build(m_players);
+        for (auto const &pot : pots)
         {
-            if (first || e.res > best)
+            if (pot.amount <= 0 || pot.eligiblePlayers.empty())
             {
-                best = e.res;
-                first = false;
+                continue;
             }
-        }
-        std::vector<std::size_t> winners;
-        winners.reserve(entries.size());
-        for (auto const &e : entries)
-        {
-            if (e.res == best)
+            ClassificationResult best{};
+            bool first = true;
+            for (std::size_t pi : pot.eligiblePlayers)
             {
-                winners.push_back(e.idx);
+                auto it = std::find_if(entries.begin(), entries.end(),
+                                       [&](auto const &e)
+                                       { return e.idx == pi; });
+                if (it == entries.end())
+                {
+                    continue;
+                }
+                if (first || it->res > best)
+                {
+                    best = it->res;
+                    first = false;
+                }
             }
-        }
-        int winnerSize = static_cast<int>(winners.size());
-        int share = m_betData.pot / std::max(1, winnerSize);
-        int rem = m_betData.pot - share * winnerSize;
-        for (int wi = 0; wi < winnerSize; ++wi)
-        {
-            m_players[winners[wi]].chips += share + (wi < rem ? 1 : 0);
+            if (first)
+            {
+                continue;
+            }
+            std::vector<std::size_t> winners;
+            for (std::size_t pi : pot.eligiblePlayers)
+            {
+                auto it = std::find_if(entries.begin(), entries.end(),
+                                       [&](auto const &e)
+                                       { return e.idx == pi; });
+                if (it != entries.end() && it->res == best)
+                {
+                    winners.push_back(pi);
+                }
+            }
+            if (winners.empty())
+            {
+                continue;
+            }
+            int winnerCount = static_cast<int>(winners.size());
+            int share = pot.amount / winnerCount;
+            int rem = pot.amount - share * winnerCount;
+            std::sort(winners.begin(), winners.end());
+            for (int wi = 0; wi < winnerCount; ++wi)
+            {
+                m_players[winners[wi]].chips += share + (wi < rem ? 1 : 0);
+            }
         }
         m_betData.pot = 0;
         m_state = GameState::Finished;
@@ -216,8 +246,6 @@ private:
         {
             return false;
         }
-        // Everyone who could act has responded to the last bet/raise (or all checked)
-        // Advance street or showdown.
         switch (m_state)
         {
         case GameState::PreFlop:
@@ -245,11 +273,9 @@ private:
             showdownAndPayout();
             return;
         }
-        // Next eligible player
         std::size_t n = numberOfPlayers();
         std::size_t nxt = nextEligibleFrom(m_playersData.current == n ? m_playersData.dealer : m_playersData.current);
         m_playersData.current = nxt;
-        // If no eligible player (all folded or all-in), close betting round
         if (nxt == n)
         {
             m_playersData.toAct = 0;
@@ -264,21 +290,19 @@ private:
         {
             --m_playersData.toAct;
         }
-        // advance
         nextTurn(rng);
         return bettingRoundMaybeComplete(rng) && m_state == GameState::Finished;
     }
 
 public:
     constexpr Game(Blinds blinds) noexcept : m_blinds(blinds), m_playersData{numberOfPlayers()} {}
-    inline constexpr Player &addPlayer(int chips) noexcept
+    inline constexpr Player &addPlayer(std::uint32_t chips) noexcept
     {
         return m_players.emplace_back(m_players.size(), chips);
     }
     template <typename TRng>
     inline constexpr void startNewHand(TRng &rng) noexcept
     {
-        // Reset per-hand state
         m_board = Deck::emptyDeck();
         m_betData.pot = 0;
         m_state = GameState::PreDeal;
@@ -288,6 +312,7 @@ public:
             p.folded = false;
             p.all_in = false;
             p.committed = 0;
+            p.invested = 0;
             p.has_hole = false;
         }
         for (int r = 0; r < 2; ++r)
@@ -304,7 +329,6 @@ public:
             }
         }
 
-        // Post blinds (skip folded/broke seats)
         std::size_t sb = nextAliveFrom(m_playersData.dealer);
         std::size_t bb = nextAliveFrom(sb);
         commit(m_players[sb], m_blinds.smallBlind);
@@ -318,6 +342,7 @@ public:
         onlyOneAliveWins();
     }
     inline constexpr GameState state() const noexcept { return m_state; }
+    inline constexpr bool hasCurrentActor() const noexcept { return m_playersData.current != numberOfPlayers(); }
     inline constexpr const Player &currentPlayer() const noexcept { return m_players[m_playersData.current]; }
     inline constexpr const BetData &betData() const noexcept { return m_betData; }
     inline constexpr const Deck &board() const noexcept { return m_board; }
@@ -325,22 +350,17 @@ public:
     template <typename TRng>
     constexpr bool applyAction(TRng &rng, const ActionStruct &a) noexcept
     {
-        // If game is already done, just say so
         if (m_state == GameState::Finished)
         {
             return true;
         }
 
-        // If we're at showdown, resolve and finish
         if (m_state == GameState::Showdown)
         {
             showdownAndPayout();
             return true;
         }
-
-        // Sanity: ensure someone is to act. If not, compute nextTurn() once.
-        Player &current = m_players[m_playersData.current];
-        if (m_playersData.current == numberOfPlayers() || !current.eligible())
+        if (m_playersData.current == numberOfPlayers())
         {
             nextTurn(rng);
             if (m_state == GameState::Finished)
@@ -352,9 +372,34 @@ public:
                 return false;
             }
         }
-        // Helper lambdas
-        auto amount_to_call = [&]() -> int
-        { return std::max(0, m_betData.currentBet - current.committed); };
+
+        Player &current = m_players[m_playersData.current];
+        if (!current.eligible())
+        {
+            nextTurn(rng);
+            if (m_state == GameState::Finished)
+            {
+                return true;
+            }
+            if (m_playersData.current == numberOfPlayers())
+            {
+                return false;
+            }
+        }
+        if (m_playersData.current == numberOfPlayers())
+        {
+            nextTurn(rng);
+            if (m_state == GameState::Finished)
+            {
+                return true;
+            }
+            if (m_playersData.current == numberOfPlayers())
+            {
+                return false;
+            }
+        }
+        auto amount_to_call = [&]() -> std::uint32_t
+        { return std::max(0u, m_betData.currentBet - current.committed); };
         auto can_check = [&]() -> bool
         { return amount_to_call() == 0; };
 
@@ -363,7 +408,6 @@ public:
         case ActionType::Fold:
         {
             current.folded = true;
-            // Folding is a valid response to a bet/raise or to a zero-bet round.
             return onlyOneAliveWins() && advanceAndCheckComplete(rng);
         }
 
@@ -371,7 +415,6 @@ public:
         {
             if (can_check())
             {
-                // Valid check
                 return advanceAndCheckComplete(rng);
             }
             int need = amount_to_call();
@@ -380,9 +423,6 @@ public:
                 return advanceAndCheckComplete(rng);
             }
             commit(current, need);
-            if (current.all_in)
-            { /* no side pots here */
-            }
             return advanceAndCheckComplete(rng);
         }
 
@@ -391,31 +431,21 @@ public:
             int need = amount_to_call();
             if (need == 0)
             {
-                // Calling zero == check
                 return advanceAndCheckComplete(rng);
             }
             commit(current, need);
-            if (current.all_in)
-            { /* no side pots here */
-            }
             return advanceAndCheckComplete(rng);
         }
 
         case ActionType::Bet:
         {
-            // Allowed only when current_bet == 0
-            int amt = std::max(a.amount, m_betData.minRaise);
+            std::uint32_t amt = std::max(a.amount, m_betData.minRaise);
             if (m_betData.currentBet != 0)
             {
-                // Treat as raise if there is an existing bet
-                // fallthrough via Raise semantics below
-                int target = std::max(m_betData.currentBet + m_betData.minRaise, a.amount);
-                int add = std::max(0, target - current.committed);
+                std::uint32_t target = std::max(m_betData.currentBet + m_betData.minRaise, a.amount);
+                std::uint32_t add = std::max(0u, target - current.committed);
                 commit(current, add);
-                if (current.all_in)
-                { /* no side pots here */
-                }
-                int raise_size = std::max(0, target - m_betData.currentBet);
+                std::uint32_t raise_size = std::max(0u, target - m_betData.currentBet);
                 m_betData.currentBet = std::max(m_betData.currentBet, target);
                 if (raise_size > 0)
                 {
@@ -427,14 +457,11 @@ public:
                 return false;
             }
 
-            int target = amt; // first bet sets current_bet to bet size
-            int add = std::max(0, target - current.committed);
+            std::uint32_t target = amt;
+            std::uint32_t add = std::max(0u, target - current.committed);
             commit(current, add);
-            if (current.all_in)
-            { /* no side pots here */
-            }
             m_betData.currentBet = target;
-            m_betData.minRaise = amt; // first bet defines min_raise going forward
+            m_betData.minRaise = amt;
             m_playersData.lastAggressor = m_playersData.current;
             m_playersData.toAct = countEligibleExcluding(m_playersData.current);
             nextTurn(rng);
@@ -442,14 +469,10 @@ public:
         }
         case ActionType::Raise:
         {
-            // Require current_bet > 0
-            int target = std::max(m_betData.currentBet + m_betData.minRaise, a.amount);
-            int add = std::max(0, target - current.committed);
+            std::uint32_t target = std::max(m_betData.currentBet + m_betData.minRaise, a.amount);
+            std::uint32_t add = std::max(0u, target - current.committed);
             commit(current, add);
-            if (current.all_in)
-            { /* no side pots here */
-            }
-            int raise_size = std::max(0, target - m_betData.currentBet);
+            std::uint32_t raise_size = std::max(0u, target - m_betData.currentBet);
             m_betData.currentBet = std::max(m_betData.currentBet, target);
             if (raise_size > 0)
             {
@@ -462,19 +485,15 @@ public:
         }
         case ActionType::AllIn:
         {
-            // Treat as bet/raise/call depending on committed + chips
-            int target = current.committed + current.chips; // push all chips
-            int add = std::max(0, target - current.committed);
+            std::uint32_t target = current.committed + current.chips;
+            std::uint32_t add = std::max(0u, target - current.committed);
             commit(current, add);
-            // Update bet/raise bookkeeping if this actually exceeds current_bet
             if (target <= m_betData.currentBet)
             {
-                // For now, treat as Call if possible.
                 return advanceAndCheckComplete(rng);
             }
-            int raise_size = target - m_betData.currentBet;
+            std::uint32_t raise_size = target - m_betData.currentBet;
             m_betData.currentBet = target;
-            // All-in can be for less than min-raise; allow but don't update min_raise unless it meets it
             if (raise_size >= m_betData.minRaise)
             {
                 m_betData.minRaise = raise_size;

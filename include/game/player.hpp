@@ -5,18 +5,21 @@
 struct Player
 {
     std::size_t id = 0;
-    int chips = 0;
+    Deck hole{};
+    std::uint32_t chips = 0;
+    std::uint32_t committed = 0;
+    std::uint32_t invested = 0;
     bool folded = false;
     bool all_in = false;
-    int committed = 0;
-    Deck hole{};
     bool has_hole = false;
-    inline constexpr bool eligible() const noexcept { return !folded && !all_in; }
-    inline constexpr bool alive() const noexcept { return !folded; } // can be all-in but still in the hand
+    inline constexpr bool eligible() const noexcept { return alive() && !all_in; }
+    inline constexpr bool alive() const noexcept { return !folded && chips >= 0 && has_hole; } // can be all-in but still in the hand
+    constexpr Player() = default;
+    constexpr Player(std::size_t id_, int chips_) : id(id_), chips(chips_) {}
 };
 struct ActionStruct
 {
     ActionType type;
-    int amount = 0;
+    std::uint32_t amount = 0;
 };
 #endif // __POKER_PLAYER_HPP__
