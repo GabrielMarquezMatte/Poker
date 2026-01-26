@@ -51,9 +51,16 @@ TEST(ExecutionTests, TwoPairOnTheBoardKickerWars)
     EXPECT_LE(probability, 0.22);
 }
 
-TEST(ExecutionTests, JHighFlushVsTheField)
+TEST(ExecutionTests, StraightOnPairedBoardVsTheField) // Nome corrigido
 {
     double probability = calculateProbability("jh 6h", "qs 8d ts td 9c", 500'000, 8);
     EXPECT_GE(probability, 0.74);
     EXPECT_LE(probability, 0.75);
+}
+
+TEST(ExecutionTests, JHighFlushVsTheField)
+{
+    double probability = calculateProbability("jh 6h", "qs 8h th 2h 3d", 500'000, 8);
+    EXPECT_GE(probability, 0.86);
+    EXPECT_LE(probability, 0.89);
 }

@@ -11,15 +11,12 @@ enable_testing()
 
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /WX /arch:AVX2")
-  set(CMAKE_EXE_LINKER_FLAGS     "${CMAKE_EXE_LINKER_FLAGS} /LTCG:OFF")
-  set(CMAKE_SHARED_LINKER_FLAGS  "${CMAKE_SHARED_LINKER_FLAGS} /LTCG:OFF")
-  set(CMAKE_MODULE_LINKER_FLAGS  "${CMAKE_MODULE_LINKER_FLAGS} /LTCG:OFF")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4702")
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -pedantic -Wno-error=array-bounds -march=native -mavx2")
 endif()
 
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 # Conan's CMakeDeps will provide these packages:
 find_package(benchmark CONFIG REQUIRED)

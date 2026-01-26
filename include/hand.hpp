@@ -128,22 +128,44 @@ private:
     }
     static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(std::uint64_t handMask) noexcept
     {
-        std::uint8_t maxC = 0, secondC = 0;
-        for (int r = 0; r < 13; ++r)
+        const std::uint64_t s0 = handMask & 0x1FFFull;
+        const std::uint64_t s1 = (handMask >> 13) & 0x1FFFull;
+        const std::uint64_t s2 = (handMask >> 26) & 0x1FFFull;
+        const std::uint64_t s3 = (handMask >> 39) & 0x1FFFull;
+        const std::uint64_t all4 = s0 & s1 & s2 & s3;
+        if (all4)
         {
-            std::uint64_t nib = pext(handMask, rankMasks[r]);
-            std::uint8_t c = popCountTable[nib];
-            if (c > maxC)
-            {
-                secondC = maxC;
-                maxC = c;
-            }
-            else if (c > secondC)
-            {
-                secondC = c;
-            }
+            const std::uint64_t without4 = ~all4 & 0x1FFFull;
+            const std::uint64_t s0w = s0 & without4, s1w = s1 & without4;
+            const std::uint64_t s2w = s2 & without4, s3w = s3 & without4;
+            const std::uint64_t three = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
+            if (three) return {4, 3};
+            const std::uint64_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
+            if (two) return {4, 2};
+            if ((s0w | s1w | s2w | s3w) != 0) return {4, 1};
+            return {4, 0};
         }
-        return {maxC, secondC};
+        const std::uint64_t three = (s0 & s1 & s2) | (s0 & s1 & s3) | (s0 & s2 & s3) | (s1 & s2 & s3);
+        if (three)
+        {
+            const std::uint64_t without3 = ~three & 0x1FFFull;
+            const std::uint64_t s0w = s0 & without3, s1w = s1 & without3;
+            const std::uint64_t s2w = s2 & without3, s3w = s3 & without3;
+            const std::uint64_t three2 = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
+            if (three2) return {3, 3};
+            const std::uint64_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
+            if (two) return {3, 2};
+            return {3, 1};
+        }
+        const std::uint64_t two = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
+        if (two)
+        {
+            const int pairCount = std::popcount(two);
+            if (pairCount >= 2) return {2, 2};
+            return {2, 1};
+        }
+        const std::uint64_t any = s0 | s1 | s2 | s3;
+        return {1, static_cast<std::uint8_t>(std::popcount(any) > 1 ? 1 : 0)};
     }
     static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
     {
