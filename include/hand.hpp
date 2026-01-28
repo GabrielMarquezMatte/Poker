@@ -38,30 +38,12 @@ private:
         }
         return tbl;
     }();
-    static constexpr std::array<std::uint64_t, 13> rankMasks = []()
-    {
-        std::array<std::uint64_t, 13> m{};
-        for (std::size_t r = 0; r < 13; ++r)
-        {
-            m[r] = (1ULL << (r + 0 * 13)) | (1ULL << (r + 1 * 13)) | (1ULL << (r + 2 * 13)) | (1ULL << (r + 3 * 13));
-        }
-        return m;
-    }();
     static constexpr std::array<uint16_t, 1 << 13> flushTable = []()
     {
         std::array<uint16_t, 1 << 13> table{};
         for (std::uint32_t m = 0; m < (1 << 13); ++m)
         {
             table[m] = (std::popcount(m) >= 5 ? uint16_t(m) : 0);
-        }
-        return table;
-    }();
-    static constexpr std::array<std::uint8_t, 16> popCountTable = []()
-    {
-        std::array<std::uint8_t, 16> table{};
-        for (std::uint32_t i = 0; i < table.size(); ++i)
-        {
-            table[i] = static_cast<std::uint8_t>(std::popcount(i));
         }
         return table;
     }();
@@ -106,73 +88,49 @@ private:
         }
         return t;
     }();
-    static inline constexpr std::uint64_t pext(std::uint64_t x, std::uint64_t mask) noexcept
+    static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
     {
-        if (!std::is_constant_evaluated())
+        const std::uint16_t all4 = s0 & s1 & s2 & s3;
+        if (all4) [[unlikely]]
         {
-            return _pext_u64(x, mask);
-        }
-        std::uint64_t result = 0;
-        std::uint64_t outBit = 1;
-        while (mask)
-        {
-            std::uint64_t lowest = mask & static_cast<std::int64_t>(-static_cast<std::int64_t>(mask));
-            if (x & lowest)
-            {
-                result |= outBit;
-            }
-            mask &= mask - 1;
-            outBit <<= 1;
-        }
-        return result;
-    }
-    static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(std::uint64_t handMask) noexcept
-    {
-        const std::uint64_t s0 = handMask & 0x1FFFull;
-        const std::uint64_t s1 = (handMask >> 13) & 0x1FFFull;
-        const std::uint64_t s2 = (handMask >> 26) & 0x1FFFull;
-        const std::uint64_t s3 = (handMask >> 39) & 0x1FFFull;
-        const std::uint64_t all4 = s0 & s1 & s2 & s3;
-        if (all4)
-        {
-            const std::uint64_t without4 = ~all4 & 0x1FFFull;
-            const std::uint64_t s0w = s0 & without4, s1w = s1 & without4;
-            const std::uint64_t s2w = s2 & without4, s3w = s3 & without4;
-            const std::uint64_t three = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three) return {4, 3};
-            const std::uint64_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
-            if (two) return {4, 2};
+            const std::uint16_t without4 = ~all4 & 0x1FFFu;
+            const std::uint16_t s0w = s0 & without4;
+            const std::uint16_t s1w = s1 & without4;
+            const std::uint16_t s2w = s2 & without4;
+            const std::uint16_t s3w = s3 & without4;
+            const std::uint16_t three = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
+            if (three) [[unlikely]] return {4, 3};
+            const std::uint16_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
+            if (two) [[unlikely]] return {4, 2};
             if ((s0w | s1w | s2w | s3w) != 0) return {4, 1};
             return {4, 0};
         }
-        const std::uint64_t three = (s0 & s1 & s2) | (s0 & s1 & s3) | (s0 & s2 & s3) | (s1 & s2 & s3);
-        if (three)
+        const std::uint16_t three = (s0 & s1 & s2) | (s0 & s1 & s3) | (s0 & s2 & s3) | (s1 & s2 & s3);
+        if (three) [[unlikely]]
         {
-            const std::uint64_t without3 = ~three & 0x1FFFull;
-            const std::uint64_t s0w = s0 & without3, s1w = s1 & without3;
-            const std::uint64_t s2w = s2 & without3, s3w = s3 & without3;
-            const std::uint64_t three2 = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three2) return {3, 3};
-            const std::uint64_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
-            if (two) return {3, 2};
+            const std::uint16_t without3 = ~three & 0x1FFFu;
+            const std::uint16_t s0w = s0 & without3;
+            const std::uint16_t s1w = s1 & without3;
+            const std::uint16_t s2w = s2 & without3;
+            const std::uint16_t s3w = s3 & without3;
+            const std::uint16_t three2 = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
+            if (three2) [[unlikely]] return {3, 3};
+            const std::uint16_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
+            if (two) [[unlikely]] return {3, 2};
             return {3, 1};
         }
-        const std::uint64_t two = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
+        const std::uint16_t two = (s0 & s1) | (s0 & s2) | (s0 & s3) | (s1 & s2) | (s1 & s3) | (s2 & s3);
         if (two)
         {
             const int pairCount = std::popcount(two);
             if (pairCount >= 2) return {2, 2};
             return {2, 1};
         }
-        const std::uint64_t any = s0 | s1 | s2 | s3;
+        const std::uint16_t any = s0 | s1 | s2 | s3;
         return {1, static_cast<std::uint8_t>(std::popcount(any) > 1 ? 1 : 0)};
     }
-    static inline constexpr std::tuple<bool, Rank> getFlush(std::uint64_t deckMask) noexcept
+    static inline constexpr std::tuple<bool, Rank> getFlush(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
     {
-        const std::uint16_t s0 = static_cast<std::uint16_t>(deckMask & 0x1FFFu);
-        const std::uint16_t s1 = static_cast<std::uint16_t>((deckMask >> 13) & 0x1FFFu);
-        const std::uint16_t s2 = static_cast<std::uint16_t>((deckMask >> 26) & 0x1FFFu);
-        const std::uint16_t s3 = static_cast<std::uint16_t>((deckMask >> 39) & 0x1FFFu);
         const std::uint16_t f0 = flushTable[s0];
         const std::uint16_t f1 = flushTable[s1];
         const std::uint16_t f2 = flushTable[s2];
@@ -186,25 +144,31 @@ private:
     {
         return straightTable[static_cast<std::uint16_t>(rankMask)];
     }
-    static inline constexpr uint16_t makeTwoPairMask(std::uint64_t deckMask) noexcept
+    static inline constexpr uint16_t makeTwoPairMask(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
     {
-        constexpr std::uint64_t RANK_MASK = (1u << 13) - 1;
-        const std::uint16_t a = std::uint16_t((deckMask)&RANK_MASK);
-        const std::uint16_t b = std::uint16_t((deckMask >> 13) & RANK_MASK);
-        const std::uint16_t c = std::uint16_t((deckMask >> 26) & RANK_MASK);
-        const std::uint16_t d = std::uint16_t((deckMask >> 39) & RANK_MASK);
-        const std::uint16_t any = std::uint16_t(a | b | c | d);
-        const std::uint16_t pairs = std::uint16_t((a & b) | (c & d) | ((a ^ b) & (c ^ d)));
+        const std::uint16_t any = std::uint16_t(s0 | s1 | s2 | s3);
+        const std::uint16_t pairs = std::uint16_t((s0 & s1) | (s2 & s3) | ((s0 ^ s1) & (s2 ^ s3)));
         const std::uint16_t pairBits = top2Table[pairs];
         const std::uint16_t kickerBit = hiTable[std::uint16_t(any & ~pairBits)];
         return std::uint16_t(pairBits | kickerBit);
+    }
+
+    static inline constexpr std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> getSuitRanks(std::uint64_t deckMask) noexcept
+    {
+        constexpr std::uint64_t RANK_MASK = (1u << 13) - 1;
+        const std::uint16_t s0 = static_cast<std::uint16_t>(deckMask & RANK_MASK);
+        const std::uint16_t s1 = static_cast<std::uint16_t>((deckMask >> 13) & RANK_MASK);
+        const std::uint16_t s2 = static_cast<std::uint16_t>((deckMask >> 26) & RANK_MASK);
+        const std::uint16_t s3 = static_cast<std::uint16_t>((deckMask >> 39) & RANK_MASK);
+        return {s0, s1, s2, s3};
     }
 
 public:
     static inline constexpr ClassificationResult classify(const Deck cards) noexcept
     {
         std::uint64_t deckMask = cards.getMask();
-        auto [flush, rankValue] = getFlush(deckMask);
+        auto [s0, s1, s2, s3] = getSuitRanks(deckMask);
+        auto [flush, rankValue] = getFlush(s0, s1, s2, s3);
         auto [straight, highRank] = getStraight(rankValue);
         if (straight && flush)
         {
@@ -214,7 +178,7 @@ public:
             }
             return {Classification::StraightFlush, highRank};
         }
-        auto [maxCount, secondMaxCount] = topTwoCounts(deckMask);
+        auto [maxCount, secondMaxCount] = topTwoCounts(s0, s1, s2, s3);
         if (maxCount == 4)
         {
             return {Classification::FourOfAKind, rankValue};
@@ -241,7 +205,7 @@ public:
         }
         if (secondMaxCount == 2)
         {
-            std::uint16_t twoPairMask = makeTwoPairMask(deckMask);
+            std::uint16_t twoPairMask = makeTwoPairMask(s0, s1, s2, s3);
             return {Classification::TwoPair, static_cast<Rank>(twoPairMask)};
         }
         return {Classification::Pair, rankValue};
