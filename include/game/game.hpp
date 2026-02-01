@@ -347,6 +347,14 @@ public:
     inline constexpr const BetData &betData() const noexcept { return m_betData; }
     inline constexpr const Deck &board() const noexcept { return m_board; }
     inline constexpr std::span<const Player> players() const noexcept { return m_players; }
+    inline constexpr std::span<Player> mutablePlayers() noexcept { return m_players; }
+    inline constexpr void resetPlayerChips(std::uint32_t chips) noexcept
+    {
+        for (auto &p : m_players)
+        {
+            p.chips = chips;
+        }
+    }
     template <typename TRng>
     constexpr bool applyAction(TRng &rng, const ActionStruct &a) noexcept
     {

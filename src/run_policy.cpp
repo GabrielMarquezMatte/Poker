@@ -2,7 +2,9 @@
 #include <iostream>
 #include <random>
 #include <algorithm>
+#include <thread>
 #include <dlib/dnn.h>
+#include <BS_thread_pool.hpp>
 
 #include "../include/neural_network/dlib_policy.hpp"   // policy_net, policy_greedy
 #include "../include/neural_network/rl_featurizer.hpp" // featurize(...)
@@ -36,7 +38,7 @@ static Game make_game(std::size_t nPlayers, int chips, const Blinds &b)
     return g;
 }
 
-static inline unsigned random_legal_action(const std::vector<unsigned> &legal, StdRng &rng)
+static inline unsigned random_legal_action(const std::span<const unsigned> legal, StdRng &rng)
 {
     if (legal.empty())
         return 0u;
@@ -59,11 +61,12 @@ static inline std::size_t find_index_by_id(const std::span<const Player> ps, std
 
 int main(int argc, char **argv)
 {
-    // Basic params (lightweight CLI: argv[1]=hands, argv[2]=players, argv[3]=chips, argv[4]=botSeat)
+    // Basic params (lightweight CLI: argv[1]=hands, argv[2]=players, argv[3]=chips, argv[4]=botSeat, argv[5]=model)
     const int hands = (argc > 1) ? std::max(1, std::atoi(argv[1])) : kDefaultHands;
     const int players = (argc > 2) ? std::max(2, std::atoi(argv[2])) : kDefaultPlayers;
     const int chips = (argc > 3) ? std::max(1, std::atoi(argv[3])) : kDefaultChips;
     std::size_t botSeat = (argc > 4) ? static_cast<std::size_t>(std::atoi(argv[4])) : kDefaultBotSeat;
+    std::string model_file = (argc > 5) ? argv[5] : "policy_best.dat";
     if (botSeat >= static_cast<std::size_t>(players))
         botSeat = 0;
 
@@ -73,17 +76,22 @@ int main(int argc, char **argv)
     policy_net net;
     try
     {
-        dlib::deserialize("policy_rl.dat") >> net;
+        dlib::deserialize(model_file) >> net;
+        std::cout << "Loaded policy from: " << model_file << "\n";
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Failed to load policy_rl.dat: " << e.what() << "\n";
+        std::cerr << "Failed to load " << model_file << ": " << e.what() << "\n";
         return 1;
     }
 
     // Table + RNG
     auto g = make_game(static_cast<std::size_t>(players), chips, blinds);
     StdRng rng;
+
+    // Create thread pool for parallel equity calculation
+    unsigned int num_threads = std::max(1u, std::thread::hardware_concurrency());
+    BS::thread_pool<BS::tp::none> pool(num_threads);
 
     // Capture the *bot identity* once (immutable id), based on initial seating
     const auto &initial_players = g.players();
@@ -97,6 +105,21 @@ int main(int argc, char **argv)
 
     for (int h = 0; h < hands; ++h)
     {
+        // Reset chips if any player is too low (to keep games going)
+        bool needs_reset = false;
+        for (const auto &p : g.players())
+        {
+            if (p.chips < blinds.bigBlind * 3)
+            {
+                needs_reset = true;
+                break;
+            }
+        }
+        if (needs_reset)
+        {
+            g.resetPlayerChips(chips);
+        }
+
         // Snapshot stacks BEFORE the hand, keyed by player id
         // (Assumes ids are in a small dense range starting at 0. If not, switch to unordered_map.)
         std::vector<std::uint32_t> chips_before_by_id(g.players().size(), 0);
@@ -126,7 +149,7 @@ int main(int argc, char **argv)
             unsigned aidx;
             if (cur_id == bot_id)
             {
-                auto s = featurize(rng.eng, g, cur_id, blinds);
+                auto s = featurize(g, cur_id, blinds, pool);
                 aidx = policy_greedy(net, s, leg);
                 if (aidx < kNumActions)
                     action_hist[aidx]++;
