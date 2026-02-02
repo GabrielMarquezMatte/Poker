@@ -88,6 +88,29 @@ private:
         }
         return t;
     }();
+    static constexpr std::array<std::uint16_t, 8192> top3Table = []()
+    {
+        std::array<std::uint16_t, 8192> t{};
+        for (std::uint16_t v = 0; v < 8192; ++v)
+        {
+            std::uint16_t m = 0;
+            int count = 0;
+            for (int r = 12; r >= 0; --r)
+            {
+                if (!(v & (std::uint16_t(1u) << r)))
+                {
+                    continue;
+                }
+                m |= std::uint16_t(1u) << r;
+                if (++count == 3)
+                {
+                    break;
+                }
+            }
+            t[v] = m;
+        }
+        return t;
+    }();
     static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
     {
         const std::uint16_t all4 = s0 & s1 & s2 & s3;
@@ -146,11 +169,26 @@ private:
     }
     static inline constexpr uint16_t makeTwoPairMask(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
     {
-        const std::uint16_t any = std::uint16_t(s0 | s1 | s2 | s3);
-        const std::uint16_t pairs = std::uint16_t((s0 & s1) | (s2 & s3) | ((s0 ^ s1) & (s2 ^ s3)));
+        const std::uint16_t any = s0 | s1 | s2 | s3;
+        const std::uint16_t pairs = (s0 & s1) | (s2 & s3) | ((s0 ^ s1) & (s2 ^ s3));
         const std::uint16_t pairBits = top2Table[pairs];
-        const std::uint16_t kickerBit = hiTable[std::uint16_t(any & ~pairBits)];
+        const std::uint16_t kickerBit = hiTable[any & ~pairBits];
         return std::uint16_t(pairBits | kickerBit);
+    }
+
+    static inline constexpr uint16_t makePairMask(std::uint16_t s0, std::uint16_t s1, std::uint16_t s2, std::uint16_t s3) noexcept
+    {
+        const std::uint16_t any = s0 | s1 | s2 | s3;
+        const std::uint16_t pairs = (s0 & s1) | (s2 & s3) | ((s0 ^ s1) & (s2 ^ s3));
+        const std::uint16_t pairBit = hiTable[pairs];
+        const std::uint16_t kickerRanks = any & ~pairBit;
+        const std::uint16_t top3Kickers = top3Table[kickerRanks];
+        // Encode pair rank index in high bits (multiply by 512), kickers in low bits
+        // This ensures pair rank is compared first, then kickers
+        const int pairRankIndex = std::countr_zero(static_cast<std::uint32_t>(pairBit));
+        // Shift kickers to fit in 9 bits (bits 4-12 → 0-8)
+        const std::uint16_t kickerValue = top3Kickers >> 4;
+        return static_cast<std::uint16_t>(pairRankIndex << 9) | kickerValue;
     }
 
     static inline constexpr std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> getSuitRanks(std::uint64_t deckMask) noexcept
@@ -208,7 +246,8 @@ public:
             std::uint16_t twoPairMask = makeTwoPairMask(s0, s1, s2, s3);
             return {Classification::TwoPair, static_cast<Rank>(twoPairMask)};
         }
-        return {Classification::Pair, rankValue};
+        std::uint16_t pairMask = makePairMask(s0, s1, s2, s3);
+        return {Classification::Pair, static_cast<Rank>(pairMask)};
     }
 };
 #endif // __POKER_HAND_HPP__

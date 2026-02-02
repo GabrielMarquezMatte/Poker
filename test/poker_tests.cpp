@@ -102,7 +102,14 @@ TEST(DeckTest, ClassifyOnePair)
                                                    Card(Suit::Hearts, Rank::Queen),
                                                    Card(Suit::Diamonds, Rank::Jack)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::Pair, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack), "Expected Pair classification");
+    static_assert(result.getClassification() == Classification::Pair, "Expected Pair classification");
+    static constexpr Deck lowerPairDeck = Deck::createDeck({Card(Suit::Hearts, Rank::King),
+                                                            Card(Suit::Diamonds, Rank::King),
+                                                            Card(Suit::Clubs, Rank::Ace),
+                                                            Card(Suit::Hearts, Rank::Queen),
+                                                            Card(Suit::Diamonds, Rank::Jack)});
+    static constexpr ClassificationResult lowerResult = Hand::classify(lowerPairDeck);
+    static_assert(result > lowerResult, "Pair of Aces should beat Pair of Kings");
 }
 TEST(DeckTest, ClassifyHighCard)
 {
@@ -408,4 +415,17 @@ TEST(EdgeCases, StaticAssert_Complex7CardHands)
     static constexpr Deck quadsHand = Deck::parseHand("5c 5d 5h 5s as ac 2d");
     static_assert(Hand::classify(quadsHand).getClassification() == Classification::FourOfAKind,
         "FALHA DE COMPILACAO: Full House foi priorizado indevidamente sobre Four of a Kind.");
+}
+
+TEST(BugReproduction, PairEquality_DifferentPairs)
+{
+    static constexpr Deck board = Deck::parseHand("Ah Kd Qc Js 2h");
+    static constexpr Deck p1 = Deck::parseHand("As 3s");
+    static constexpr Deck p2 = Deck::parseHand("Ks 3d");
+    static constexpr ClassificationResult r1 = Hand::classify(Deck::createDeck({p1, board}));
+    static constexpr ClassificationResult r2 = Hand::classify(Deck::createDeck({p2, board}));
+
+    // Now that we fix the implementation, r1 > r2 because Pair of Aces (Main=A) >
+    // Pair of Kings (Main=K).
+    static_assert(r1 > r2, "Pair of Aces should beat Pair of Kings despite having same kickers/ranks.");
 }
