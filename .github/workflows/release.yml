@@ -82,7 +82,7 @@ jobs:
       - name: Configure (CMake)
         run: >-
           cmake -S . -B build
-          -DCMAKE_TOOLCHAIN_FILE="build/generators/conan_toolchain.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/generators/conan_toolchain.cmake"
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build

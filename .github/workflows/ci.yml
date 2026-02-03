@@ -83,10 +83,18 @@ jobs:
           -s compiler.cppstd=23
           -c tools.build:jobs=${{ env.JOBS }}
 
+      - name: Debug - List build directory
+        shell: bash
+        run: |
+          echo "=== Build directory contents ==="
+          find build -type f -name "*.cmake" 2>/dev/null || echo "No cmake files found"
+          ls -la build/ || echo "build/ does not exist"
+          ls -la build/generators/ 2>/dev/null || echo "build/generators/ does not exist"
+
       - name: Configure (CMake)
         run: >-
           cmake -S . -B build
-          -DCMAKE_TOOLCHAIN_FILE="build/generators/conan_toolchain.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/generators/conan_toolchain.cmake"
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
