@@ -124,4 +124,7 @@ jobs:
             build/Poker
             build/Poker_Game
             build/Poker_Benchmark
+            build/Poker_RunPolicy
+            build/Poker_Trainer
+            build/**/Release/*.exe
           if-no-files-found: ignore
