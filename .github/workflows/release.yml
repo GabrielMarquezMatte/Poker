@@ -41,6 +41,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install 'cmake>=3.31' 'conan>=2.2' ninja
 
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
       - name: Enable MSVC dev environment (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -67,6 +73,7 @@ jobs:
       - name: Conan install deps
         run: >-
           conan install .
+          --output-folder=build
           --build=missing
           -s build_type=Release
           -s compiler.cppstd=23

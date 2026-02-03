@@ -7,6 +7,7 @@
 #include "../classification_result.hpp"
 #include "../hand.hpp"
 #include <span>
+#include <cstdlib>
 struct BetData
 {
     std::uint32_t pot = 0;
@@ -81,7 +82,6 @@ private:
 
     inline constexpr void commit(Player &player, std::uint32_t amount) noexcept
     {
-        amount = std::max(0u, amount);
         std::uint32_t pay = std::min(amount, player.chips);
         player.chips -= pay;
         player.committed += pay;
@@ -165,72 +165,53 @@ private:
     }
     inline constexpr void showdownAndPayout() noexcept
     {
-        Deck table = m_board;
-        struct Entry
+        const std::size_t n = numberOfPlayers();
+        std::vector<ClassificationResult> hands(n);
+        std::vector<bool> hasHand(n, false);
+        
+        for (std::size_t i = 0; i < n; ++i)
         {
-            std::size_t idx;
-            ClassificationResult res;
-        };
-        std::vector<Entry> entries;
-        entries.reserve(numberOfPlayers());
-        for (std::size_t i = 0; i < numberOfPlayers(); ++i)
-        {
-            auto const &p = m_players[i];
-            if (!p.alive())
+            if (m_players[i].alive())
             {
-                continue;
+                hands[i] = Hand::classify(Deck::createDeck({m_players[i].hole, m_board}));
+                hasHand[i] = true;
             }
-            auto res = Hand::classify(Deck::createDeck({p.hole, table}));
-            entries.push_back({i, res});
         }
+        
         auto pots = PotManager::build(m_players);
         for (auto const &pot : pots)
         {
-            if (pot.amount <= 0 || pot.eligiblePlayers.empty())
+            if (pot.amount == 0 || pot.eligiblePlayers.empty())
             {
                 continue;
             }
+            
             ClassificationResult best{};
             bool first = true;
             for (std::size_t pi : pot.eligiblePlayers)
             {
-                auto it = std::find_if(entries.begin(), entries.end(),
-                                       [&](auto const &e)
-                                       { return e.idx == pi; });
-                if (it == entries.end())
+                if (hasHand[pi] && (first || hands[pi] > best))
                 {
-                    continue;
-                }
-                if (first || it->res > best)
-                {
-                    best = it->res;
+                    best = hands[pi];
                     first = false;
                 }
             }
-            if (first)
-            {
-                continue;
-            }
+            if (first) continue;
+            
             std::vector<std::size_t> winners;
             for (std::size_t pi : pot.eligiblePlayers)
             {
-                auto it = std::find_if(entries.begin(), entries.end(),
-                                       [&](auto const &e)
-                                       { return e.idx == pi; });
-                if (it != entries.end() && it->res == best)
+                if (hasHand[pi] && hands[pi] == best)
                 {
                     winners.push_back(pi);
                 }
             }
-            if (winners.empty())
-            {
-                continue;
-            }
-            int winnerCount = static_cast<int>(winners.size());
-            int share = pot.amount / winnerCount;
-            int rem = pot.amount - share * winnerCount;
+            if (winners.empty()) continue;
+            
             std::sort(winners.begin(), winners.end());
-            for (int wi = 0; wi < winnerCount; ++wi)
+            std::uint32_t share = pot.amount / static_cast<std::uint32_t>(winners.size());
+            std::uint32_t rem = pot.amount % static_cast<std::uint32_t>(winners.size());
+            for (std::size_t wi = 0; wi < winners.size(); ++wi)
             {
                 m_players[winners[wi]].chips += share + (wi < rem ? 1 : 0);
             }
@@ -315,18 +296,15 @@ public:
             p.invested = 0;
             p.has_hole = false;
         }
-        for (int r = 0; r < 2; ++r)
+        for (std::size_t i = 0; i < numberOfPlayers(); ++i)
         {
-            for (int i = 0; i < numberOfPlayers(); ++i)
+            if (m_players[i].chips <= 0)
             {
-                if (m_players[i].chips <= 0)
-                {
-                    m_players[i].folded = true;
-                    continue;
-                }
-                m_players[i].hole = m_deck.popRandomCards(rng, 2);
-                m_players[i].has_hole = true;
+                m_players[i].folded = true;
+                continue;
             }
+            m_players[i].hole = m_deck.popRandomCards(rng, 2);
+            m_players[i].has_hole = true;
         }
 
         std::size_t sb = nextAliveFrom(m_playersData.dealer);
@@ -416,7 +394,7 @@ public:
         case ActionType::Fold:
         {
             current.folded = true;
-            return onlyOneAliveWins() && advanceAndCheckComplete(rng);
+            return onlyOneAliveWins() || advanceAndCheckComplete(rng);
         }
 
         case ActionType::Check:

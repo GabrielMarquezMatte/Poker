@@ -13,9 +13,9 @@ struct Player
     bool all_in = false;
     bool has_hole = false;
     inline constexpr bool eligible() const noexcept { return alive() && !all_in; }
-    inline constexpr bool alive() const noexcept { return !folded && chips >= 0 && has_hole; } // can be all-in but still in the hand
+    inline constexpr bool alive() const noexcept { return !folded && has_hole; }
     constexpr Player() = default;
-    constexpr Player(std::size_t id_, int chips_) : id(id_), chips(chips_) {}
+    constexpr Player(std::size_t id_, std::uint32_t chips_) : id(id_), chips(chips_) {}
 };
 struct ActionStruct
 {

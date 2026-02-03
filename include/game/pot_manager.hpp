@@ -12,50 +12,51 @@ struct SidePot
 };
 struct PotManager
 {
-    static constexpr std::vector<SidePot> build(const std::span<const Player> players)
+    static constexpr std::vector<SidePot> build(std::span<const Player> players)
     {
         const std::size_t n = players.size();
-        std::vector<std::uint32_t> contrib(n, 0);
-        std::vector<bool> isActive(n, false);
-        for (std::size_t i = 0; i < n; ++i)
+        if (n == 0) return {};
+        
+        std::vector<std::uint32_t> levels;
+        levels.reserve(n);
+        for (const auto& p : players)
         {
-            contrib[i] = std::max(0u, players[i].invested);
-            isActive[i] = players[i].alive() && !players[i].folded;
+            if (p.invested > 0)
+            {
+                levels.push_back(p.invested);
+            }
         }
-        std::uint32_t prevCap = 0;
+        if (levels.empty()) return {};
+        
+        std::sort(levels.begin(), levels.end());
+        levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+        
         std::vector<SidePot> pots;
-        pots.reserve(n);
-        while (true)
+        pots.reserve(levels.size());
+        
+        std::uint32_t prevCap = 0;
+        for (std::uint32_t cap : levels)
         {
-            std::uint32_t cap = 0;
-            for (std::uint32_t c : contrib)
-            {
-                if (c > prevCap)
-                {
-                    cap = (cap == 0) ? c : std::min(cap, c);
-                }
-            }
-            if (cap == 0)
-            {
-                break;
-            }
-            const std::uint32_t capDelta = cap - prevCap;
-            SidePot pot{};
+            const std::uint32_t delta = cap - prevCap;
+            SidePot pot;
+            pot.eligiblePlayers.reserve(n);
+            
             for (std::size_t i = 0; i < n; ++i)
             {
-                if (contrib[i] > prevCap)
+                if (players[i].invested > prevCap)
                 {
-                    pot.amount += capDelta;
+                    pot.amount += delta;
                 }
-            }
-            for (std::size_t i = 0; i < n; ++i)
-            {
-                if (isActive[i] && contrib[i] >= cap)
+                if (players[i].alive() && players[i].invested >= cap)
                 {
                     pot.eligiblePlayers.push_back(i);
                 }
             }
-            pots.push_back(std::move(pot));
+            
+            if (pot.amount > 0 && !pot.eligiblePlayers.empty())
+            {
+                pots.push_back(std::move(pot));
+            }
             prevCap = cap;
         }
         return pots;
