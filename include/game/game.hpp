@@ -20,6 +20,7 @@ struct PlayersData
     std::size_t current = 0;
     std::size_t lastAggressor = 0;
     std::size_t toAct = 0;
+    constexpr PlayersData() = default;
     constexpr PlayersData(std::size_t numberOfPlayers) : dealer(0), current(numberOfPlayers), lastAggressor(numberOfPlayers), toAct(0) {}
 };
 class Game
@@ -276,7 +277,7 @@ private:
     }
 
 public:
-    constexpr Game(Blinds blinds) noexcept : m_blinds(blinds), m_playersData{numberOfPlayers()} {}
+    constexpr Game(Blinds blinds) noexcept : m_blinds(blinds) {}
     inline constexpr Player &addPlayer(std::uint32_t chips) noexcept
     {
         return m_players.emplace_back(m_players.size(), chips);

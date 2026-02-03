@@ -65,7 +65,8 @@ static void BM_DeckIteration(benchmark::State &state)
         std::size_t count = 0;
         for (const auto &card : deck)
         {
-            benchmark::DoNotOptimize(card);
+            Card cardCopy = card;
+            benchmark::DoNotOptimize(cardCopy);
             ++count;
         }
         benchmark::DoNotOptimize(count);
