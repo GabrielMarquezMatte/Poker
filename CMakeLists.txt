@@ -20,7 +20,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 # Conan's CMakeDeps will provide these packages:
 find_package(benchmark CONFIG REQUIRED)
-find_package(gtest CONFIG REQUIRED)
+find_package(GTest CONFIG REQUIRED)
 find_package(bshoshany-thread-pool CONFIG REQUIRED)
 find_package(dlib CONFIG REQUIRED)
 find_package(GIF CONFIG REQUIRED)
