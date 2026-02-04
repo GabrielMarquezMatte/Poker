@@ -208,7 +208,7 @@ public:
         auto [s0, s1, s2, s3] = getSuitRanks(deckMask);
         auto [flush, rankValue] = getFlush(s0, s1, s2, s3);
         auto [straight, highRank] = getStraight(rankValue);
-        if (straight && flush)
+        if (straight && flush) [[unlikely]]
         {
             if (highRank == Rank::Ace)
             {
@@ -217,19 +217,19 @@ public:
             return {Classification::StraightFlush, highRank};
         }
         auto [maxCount, secondMaxCount] = topTwoCounts(s0, s1, s2, s3);
-        if (maxCount == 4)
+        if (maxCount == 4) [[unlikely]]
         {
             return {Classification::FourOfAKind, rankValue};
         }
-        if (maxCount == 3 && secondMaxCount == 2)
+        if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
         {
             return {Classification::FullHouse, rankValue};
         }
-        if (flush)
+        if (flush) [[unlikely]]
         {
             return {Classification::Flush, rankValue};
         }
-        if (straight)
+        if (straight) [[unlikely]]
         {
             return {Classification::Straight, highRank};
         }

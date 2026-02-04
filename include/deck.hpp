@@ -164,6 +164,23 @@ public:
         m_cardsBitmask &= ~calculateCardMask(card);
     }
     template<typename TRng>
+    inline constexpr Deck popPair(TRng &rng) noexcept
+    {
+        std::uint64_t tmp = m_cardsBitmask;
+        std::size_t count = size();
+        std::uint64_t rand_val = rng();
+        std::uint32_t idx1 = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(rand_val)) * count) >> 32;
+        std::uint32_t idx2 = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(rand_val >> 32)) * (count - 1)) >> 32;
+        if (idx2 >= idx1) 
+        {
+            idx2++;
+        }
+        std::uint64_t pdep_mask = (1ULL << idx1) | (1ULL << idx2);
+        std::uint64_t result = pdep(pdep_mask, tmp);
+        m_cardsBitmask &= ~result;
+        return Deck::from_mask(result);
+    }
+    template<typename TRng>
     inline constexpr Deck popRandomCards(TRng &rng, std::size_t count) noexcept
     {
         const std::size_t total = size();
@@ -238,7 +255,7 @@ public:
     }
     inline constexpr std::size_t size() const noexcept
     {
-        return std::popcount(static_cast<std::uint64_t>(m_cardsBitmask));
+        return std::popcount(m_cardsBitmask);
     }
     inline constexpr DeckIterator begin() const noexcept
     {

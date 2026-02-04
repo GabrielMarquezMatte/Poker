@@ -45,7 +45,7 @@ inline bool playerWinsRandomGame(TRng &rng, const Deck playerCards, Deck tableCa
     ClassificationResult mainResult = Hand::classify(Deck::createDeck({playerCards, tableCards}));
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
-        Deck opp = deck.popRandomCards(rng, 2);
+        Deck opp = deck.popPair(rng);
         const auto oppResult = Hand::classify(Deck::createDeck({opp, tableCards}));
         if (oppResult > mainResult)
         {
