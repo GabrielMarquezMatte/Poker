@@ -365,7 +365,7 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
         dlib::dnn_trainer<policy_net> trainer(net, dlib::sgd(0.0005, 0.9));
         trainer.set_learning_rate(policy_lr);
         trainer.set_min_learning_rate(1e-6);
-        trainer.set_mini_batch_size(std::min<size_t>(64, X_policy.size()));
+        trainer.set_mini_batch_size(std::min<size_t>(256, X_policy.size()));
         trainer.set_max_num_epochs(1);
         trainer.be_quiet();
         trainer.set_iterations_without_progress_threshold(200);
@@ -377,7 +377,7 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
         dlib::dnn_trainer<value_net> trainer(vnet, dlib::sgd(0.0005, 0.9));
         trainer.set_learning_rate(5e-4);
         trainer.set_min_learning_rate(1e-6);
-        trainer.set_mini_batch_size(std::min<size_t>(64, X_value.size()));
+        trainer.set_mini_batch_size(std::min<size_t>(256, X_value.size()));
         trainer.set_max_num_epochs(1);
         trainer.be_quiet();
         trainer.set_iterations_without_progress_threshold(200);

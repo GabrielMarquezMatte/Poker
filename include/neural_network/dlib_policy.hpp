@@ -14,9 +14,9 @@ constexpr int kNumActions = 5; // Fold, Check/Call, 1/2 pot, pot, all-in
 // Policy network: 32 -> 256 -> 128 -> 64 -> 5
 using policy_net = dlib::loss_multiclass_log<
     dlib::fc<kNumActions,
-             dlib::relu<dlib::fc<64,
-                                 dlib::relu<dlib::fc<128,
-                                                     dlib::relu<dlib::fc<256,
+             dlib::relu<dlib::fc<128,
+                                 dlib::relu<dlib::fc<256,
+                                                     dlib::relu<dlib::fc<512,
                                                                          dlib::input<dlib::matrix<float>>>>>>>>>>;
 
 // Value network: 32 -> 128 -> 64 -> 1

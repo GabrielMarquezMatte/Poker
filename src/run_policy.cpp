@@ -5,21 +5,21 @@
 #include <thread>
 #include <dlib/dnn.h>
 #include <BS_thread_pool.hpp>
+#include <iomanip> // Adicionado para formatação de tabela
 
-#include "../include/neural_network/dlib_policy.hpp"   // policy_net, policy_greedy
-#include "../include/neural_network/rl_featurizer.hpp" // featurize(...)
-#include "../include/neural_network/rl_actions.hpp"    // legal_actions, to_engine_action
+#include "../include/neural_network/dlib_policy.hpp"
+#include "../include/neural_network/rl_featurizer.hpp"
+#include "../include/neural_network/rl_actions.hpp"
 #include "../include/game/game.hpp"
 #include "../include/game/blinds.hpp"
 
-// ---------- Config (tweak as you like) ----------
+// ---------- Configuração ----------
 static constexpr int kDefaultPlayers = 3;
 static constexpr int kDefaultChips = 10000;
-static constexpr int kDefaultHands = 50000;
-static constexpr size_t kDefaultBotSeat = 0; // which *seat* uses the policy at the initial lineup
-static constexpr uint64_t kDefaultSeed = 12345;
-static constexpr int kVerboseEvery = 0; // 0 = silent; else prints every N hands
-// -------------------------------------------------
+static constexpr int kDefaultHands = 10000; // 10k mãos para ter relevância estatística
+static constexpr size_t kDefaultBotSeat = 0; 
+static constexpr uint64_t kDefaultSeed = 42; // Seed fixa para reprodutibilidade
+// ----------------------------------
 
 struct StdRng
 {
@@ -28,6 +28,13 @@ struct StdRng
     static constexpr result_type min() { return 0ULL; }
     static constexpr result_type max() { return ~0ULL; }
     result_type operator()() { return eng(); }
+};
+
+struct PlayerStats {
+    int64_t total_profit_bb = 0;
+    int hands_won = 0;
+    int hands_played = 0;
+    std::string type; // "Neural" ou "Random"
 };
 
 static Game make_game(std::size_t nPlayers, int chips, const Blinds &b)
@@ -46,66 +53,73 @@ static inline unsigned random_legal_action(const std::span<const unsigned> legal
     return legal[D(rng.eng)];
 }
 
-// Helper: find the *current* vector index for a given immutable player id
+// Encontra o índice atual no vetor g.players() baseado no ID imutável do jogador
 static inline std::size_t find_index_by_id(const std::span<const Player> ps, std::size_t pid)
 {
     for (std::size_t i = 0; i < ps.size(); ++i)
     {
         if (ps[i].id == pid)
-        {
             return i;
-        }
     }
     return 0;
 }
 
 int main(int argc, char **argv)
 {
-    // Basic params (lightweight CLI: argv[1]=hands, argv[2]=players, argv[3]=chips, argv[4]=botSeat, argv[5]=model)
+    // Parâmetros via linha de comando
     const int hands = (argc > 1) ? std::max(1, std::atoi(argv[1])) : kDefaultHands;
     const int players = (argc > 2) ? std::max(2, std::atoi(argv[2])) : kDefaultPlayers;
     const int chips = (argc > 3) ? std::max(1, std::atoi(argv[3])) : kDefaultChips;
     std::size_t botSeat = (argc > 4) ? static_cast<std::size_t>(std::atoi(argv[4])) : kDefaultBotSeat;
-    std::string model_file = (argc > 5) ? argv[5] : "policy_best.dat";
+    std::string model_file = (argc > 5) ? argv[5] : "policy_best.dat"; // Tenta carregar o melhor modelo por padrão
+
     if (botSeat >= static_cast<std::size_t>(players))
         botSeat = 0;
 
     Blinds blinds{50, 100};
 
-    // Load net
+    // Carregar Rede Neural
     policy_net net;
     try
     {
         dlib::deserialize(model_file) >> net;
-        std::cout << "Loaded policy from: " << model_file << "\n";
+        std::cout << ">> Modelo carregado: " << model_file << "\n";
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Failed to load " << model_file << ": " << e.what() << "\n";
+        std::cerr << "ERRO: Falha ao carregar " << model_file << ": " << e.what() << "\n";
+        std::cerr << "Certifique-se de ter treinado o modelo primeiro (execute ./Poker_Trainer).\n";
         return 1;
     }
 
-    // Table + RNG
+    // Inicialização do Jogo
     auto g = make_game(static_cast<std::size_t>(players), chips, blinds);
     StdRng rng;
-
-    // Create thread pool for parallel equity calculation
     unsigned int num_threads = std::max(1u, std::thread::hardware_concurrency());
     BS::thread_pool<BS::tp::none> pool(num_threads);
 
-    // Capture the *bot identity* once (immutable id), based on initial seating
+    // Identificar quem é o Bot Neural e quem são os Bots Aleatórios
     const auto &initial_players = g.players();
     const std::size_t bot_initial_index = std::min<std::size_t>(botSeat, initial_players.size() - 1);
     const std::size_t bot_id = initial_players[bot_initial_index].id;
 
-    // Stats
-    int64_t sum_bb_for_bot = 0;
-    uint64_t action_hist[kNumActions] = {0, 0, 0, 0, 0}; // bot action histogram
-    uint64_t bot_decisions = 0;                          // sanity counter
+    // Estatísticas por ID de jogador
+    std::vector<PlayerStats> stats(players);
+    for(size_t i=0; i < players; ++i) {
+        stats[i].type = (initial_players[i].id == bot_id) ? "NEURAL (Hero)" : "RANDOM (Villain)";
+    }
+
+    uint64_t action_hist[kNumActions] = {0}; 
+
+    std::cout << "\n=== INICIANDO BENCHMARK: Neural vs Random ===\n";
+    std::cout << "Mãos: " << hands << " | Players: " << players << " | Bot Seat: " << botSeat << "\n";
+    std::cout << "---------------------------------------------\n";
+
+    auto start_time = std::chrono::steady_clock::now();
 
     for (int h = 0; h < hands; ++h)
     {
-        // Reset chips if any player is too low (to keep games going)
+        // Resetar stacks se alguém quebrar (para manter o jogo rodando)
         bool needs_reset = false;
         for (const auto &p : g.players())
         {
@@ -120,14 +134,14 @@ int main(int argc, char **argv)
             g.resetPlayerChips(chips);
         }
 
-        // Snapshot stacks BEFORE the hand, keyed by player id
-        // (Assumes ids are in a small dense range starting at 0. If not, switch to unordered_map.)
-        std::vector<std::uint32_t> chips_before_by_id(g.players().size(), 0);
+        // Snapshot dos stacks antes da mão
+        std::vector<std::uint32_t> chips_before_by_id(players, 0);
         for (auto const &p : g.players())
             chips_before_by_id[p.id] = p.chips;
 
         g.startNewHand(rng);
 
+        // --- Loop da Mão ---
         while (g.state() != GameState::Finished)
         {
             if (!g.hasCurrentActor())
@@ -145,65 +159,86 @@ int main(int argc, char **argv)
                 continue;
             }
 
-            // choose action
             unsigned aidx;
+            // Lógica: Se for o Bot ID, usa a Rede. Se não, usa Random.
             if (cur_id == bot_id)
             {
                 auto s = featurize(g, cur_id, blinds, pool);
-                aidx = policy_greedy(net, s, leg);
-                if (aidx < kNumActions)
-                    action_hist[aidx]++;
-                ++bot_decisions;
+                aidx = policy_greedy(net, s, leg); // Usa a melhor ação (Greedy) para avaliação
+                
+                if (aidx < kNumActions) action_hist[aidx]++;
             }
             else
             {
                 aidx = random_legal_action(leg, rng);
             }
 
-            // apply
             g.applyAction(rng, to_engine_action(aidx, g, cur_id, blinds));
         }
 
-        // bot result in big blinds (map id -> current index after the hand)
-        const auto bot_idx_now = find_index_by_id(g.players(), bot_id);
-        const int32_t delta_chips =
-            int32_t(g.players()[bot_idx_now].chips) - int32_t(chips_before_by_id[bot_id]);
-        const int32_t delta_bb = delta_chips / int32_t(std::max<std::uint32_t>(1, blinds.bigBlind));
-        sum_bb_for_bot += delta_bb;
+        // --- Pós-Mão: Calcular Resultados ---
+        for (size_t i = 0; i < players; ++i) {
+            size_t pid = initial_players[i].id; // ID original
+            size_t current_idx = find_index_by_id(g.players(), pid);
+            
+            int32_t chips_after = static_cast<int32_t>(g.players()[current_idx].chips);
+            int32_t chips_before = static_cast<int32_t>(chips_before_by_id[pid]);
+            int32_t delta = chips_after - chips_before;
+            
+            // Converter para Big Blinds
+            int32_t delta_bb = delta / static_cast<int32_t>(blinds.bigBlind);
 
-        if constexpr (kVerboseEvery > 0)
-        {
-            if ((h + 1) % kVerboseEvery == 0)
-            {
-                std::cout << "Hand " << (h + 1) << "  bot_id=" << bot_id
-                          << " Δ=" << delta_bb << "bb  stacks:";
-                for (auto const &p : g.players())
-                    std::cout << " [" << p.id << ":" << p.chips << "]";
-                std::cout << "\n";
+            stats[i].total_profit_bb += delta_bb;
+            stats[i].hands_played++;
+            if (delta > 0) {
+                stats[i].hands_won++;
             }
+        }
+
+        // Feedback visual a cada 10%
+        if (hands >= 10 && (h + 1) % (hands / 10) == 0) {
+            std::cout << "." << std::flush;
         }
     }
 
-    const double bb_per_hand = double(sum_bb_for_bot) / std::max(1, hands);
-    const double bb_per_100 = 100.0 * bb_per_hand;
+    auto end_time = std::chrono::steady_clock::now();
+    double elapsed_sec = std::chrono::duration<double>(end_time - start_time).count();
 
-    std::cout << "=========================================\n";
-    std::cout << "Eval finished\n"
-              << "  hands         : " << hands << "\n"
-              << "  players       : " << players << "\n"
-              << "  bot seat      : " << botSeat << " (fixed bot_id=" << bot_id << ")\n"
-              << "  BB/100 (bot)  : " << bb_per_100 << "\n";
+    // --- Relatório Final ---
+    std::cout << "\n\n================ RESULTADOS FINAIS ================\n";
+    std::cout << "Tempo: " << std::fixed << std::setprecision(2) << elapsed_sec << "s (" 
+              << (hands / elapsed_sec) << " mãos/seg)\n\n";
 
-    static const char *kActionName[kNumActions] = {
-        "Fold", "Check/Call", "Bet 1/2 pot", "Bet pot", "All-in"};
+    std::cout << std::left << std::setw(15) << "Player" 
+              << std::setw(20) << "Type" 
+              << std::setw(15) << "BB/100" 
+              << std::setw(15) << "Win Rate %" 
+              << std::setw(15) << "Total Profit (BB)" << "\n";
+    std::cout << std::string(80, '-') << "\n";
 
-    std::cout << "  Bot action histogram:\n";
-    for (int i = 0; i < kNumActions; ++i)
-        std::cout << "    " << kActionName[i] << ": " << action_hist[i] << "\n";
+    for (size_t i = 0; i < players; ++i) {
+        double bb_100 = (double)stats[i].total_profit_bb / stats[i].hands_played * 100.0;
+        double win_rate = (double)stats[i].hands_won / stats[i].hands_played * 100.0;
 
-    std::cout << "  bot decisions : " << bot_decisions << "\n";
-    std::cout << "  decisions/hand: " << (hands > 0 ? (double)bot_decisions / hands : 0.0) << "\n";
-    std::cout << "=========================================\n";
+        std::cout << std::left << std::setw(15) << ("Seat " + std::to_string(i))
+                  << std::setw(20) << stats[i].type
+                  << std::setw(15) << std::fixed << std::setprecision(2) << bb_100
+                  << std::setw(15) << win_rate
+                  << std::setw(15) << stats[i].total_profit_bb << "\n";
+    }
+
+    std::cout << "\nDistribuição de Ações do Bot Neural:\n";
+    static const char *kActionName[kNumActions] = {"Fold", "Check/Call", "Bet 1/2", "Bet Pot", "All-in"};
+    int total_actions = 0;
+    for (int i : action_hist) total_actions += i;
+    
+    for (int i = 0; i < kNumActions; ++i) {
+        double pct = (total_actions > 0) ? (100.0 * action_hist[i] / total_actions) : 0.0;
+        std::cout << "  " << std::left << std::setw(12) << kActionName[i] 
+                  << ": " << std::setw(8) << action_hist[i] 
+                  << "(" << std::fixed << std::setprecision(1) << pct << "%)\n";
+    }
+    std::cout << "===================================================\n";
 
     return 0;
 }
