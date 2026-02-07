@@ -122,7 +122,13 @@ private:
             return s0 | s1 | s2 | s3;
         }
     };
-    static inline constexpr std::pair<std::uint8_t, std::uint8_t> topTwoCounts(SuitMasks suits, std::uint16_t anySuit) noexcept
+    struct CountInfo
+    {
+        std::uint8_t maxCount;
+        std::uint8_t secondMaxCount;
+        std::uint16_t pairs;
+    };
+    static inline constexpr CountInfo topTwoCounts(SuitMasks suits, std::uint16_t anySuit) noexcept
     {
         const std::uint16_t all4 = suits.s0 & suits.s1 & suits.s2 & suits.s3;
         if (all4) [[unlikely]]
@@ -133,11 +139,11 @@ private:
             const std::uint16_t s2w = suits.s2 & without4;
             const std::uint16_t s3w = suits.s3 & without4;
             const std::uint16_t three = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three) [[unlikely]] return {4, 3};
-            const std::uint16_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
-            if (two) [[unlikely]] return {4, 2};
-            if ((s0w | s1w | s2w | s3w) != 0) return {4, 1};
-            return {4, 0};
+            if (three) [[unlikely]] return {4, 3, 0};
+            const std::uint16_t two = (s0w & s1w) | (s2w & s3w) | ((s0w ^ s1w) & (s2w ^ s3w));
+            if (two) [[unlikely]] return {4, 2, 0};
+            if ((s0w | s1w | s2w | s3w) != 0) return {4, 1, 0};
+            return {4, 0, 0};
         }
         const std::uint16_t three = (suits.s0 & suits.s1 & suits.s2) | (suits.s0 & suits.s1 & suits.s3) | (suits.s0 & suits.s2 & suits.s3) | (suits.s1 & suits.s2 & suits.s3);
         if (three) [[unlikely]]
@@ -148,19 +154,19 @@ private:
             const std::uint16_t s2w = suits.s2 & without3;
             const std::uint16_t s3w = suits.s3 & without3;
             const std::uint16_t three2 = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three2) [[unlikely]] return {3, 3};
-            const std::uint16_t two = (s0w & s1w) | (s0w & s2w) | (s0w & s3w) | (s1w & s2w) | (s1w & s3w) | (s2w & s3w);
-            if (two) [[unlikely]] return {3, 2};
-            return {3, 1};
+            if (three2) [[unlikely]] return {3, 3, 0};
+            const std::uint16_t two = (s0w & s1w) | (s2w & s3w) | ((s0w ^ s1w) & (s2w ^ s3w));
+            if (two) [[unlikely]] return {3, 2, 0};
+            return {3, 1, 0};
         }
-        const std::uint16_t two = (suits.s0 & suits.s1) | (suits.s0 & suits.s2) | (suits.s0 & suits.s3) | (suits.s1 & suits.s2) | (suits.s1 & suits.s3) | (suits.s2 & suits.s3);
+        const std::uint16_t two = (suits.s0 & suits.s1) | (suits.s2 & suits.s3) | ((suits.s0 ^ suits.s1) & (suits.s2 ^ suits.s3));
         if (two)
         {
             const int pairCount = std::popcount(two);
-            if (pairCount >= 2) return {2, 2};
-            return {2, 1};
+            if (pairCount >= 2) return {2, 2, two};
+            return {2, 1, two};
         }
-        return {1, static_cast<std::uint8_t>(std::popcount(anySuit) > 1 ? 1 : 0)};
+        return {1, static_cast<std::uint8_t>(std::popcount(anySuit) > 1 ? 1 : 0), 0};
     }
     static inline constexpr std::tuple<bool, Rank> getFlush(SuitMasks suits, std::uint16_t anySuit) noexcept
     {
@@ -220,7 +226,7 @@ public:
             }
             return {Classification::StraightFlush, highRank};
         }
-        auto [maxCount, secondMaxCount] = topTwoCounts(suits, anySuit);
+        auto [maxCount, secondMaxCount, pairs] = topTwoCounts(suits, anySuit);
         if (maxCount == 4) [[unlikely]]
         {
             return {Classification::FourOfAKind, rankValue};
@@ -245,7 +251,6 @@ public:
         {
             return {Classification::HighCard, rankValue};
         }
-        const std::uint16_t pairs = (suits.s0 & suits.s1) | (suits.s2 & suits.s3) | ((suits.s0 ^ suits.s1) & (suits.s2 ^ suits.s3));
         if (secondMaxCount == 2)
         {
             std::uint16_t twoPairMask = makeTwoPairMask(anySuit, pairs);
