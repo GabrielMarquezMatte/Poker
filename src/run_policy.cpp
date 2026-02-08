@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 {
     // Parâmetros via linha de comando
     const int hands = (argc > 1) ? std::max(1, std::atoi(argv[1])) : kDefaultHands;
-    const int players = (argc > 2) ? std::max(2, std::atoi(argv[2])) : kDefaultPlayers;
+    const std::size_t players = (argc > 2) ? std::max(2, std::atoi(argv[2])) : kDefaultPlayers;
     const int chips = (argc > 3) ? std::max(1, std::atoi(argv[3])) : kDefaultChips;
     std::size_t botSeat = (argc > 4) ? static_cast<std::size_t>(std::atoi(argv[4])) : kDefaultBotSeat;
     std::string model_file = (argc > 5) ? argv[5] : "policy_best.dat"; // Tenta carregar o melhor modelo por padrão
