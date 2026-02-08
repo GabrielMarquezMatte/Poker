@@ -57,6 +57,20 @@ static void BM_PopRandomCards(benchmark::State &state)
 }
 BENCHMARK(BM_PopRandomCards)->DenseRange(1, 10, 1);
 
+static void BM_PopRandomCard(benchmark::State &state)
+{
+    omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());
+    for (auto _ : state)
+    {
+        Deck deck = Deck::createFullDeck();
+        Card card = deck.popRandomCard(rng);
+        benchmark::DoNotOptimize(card);
+        benchmark::DoNotOptimize(deck);
+    }
+}
+
+BENCHMARK(BM_PopRandomCard);
+
 static void BM_PopPairOfRandomCards(benchmark::State &state)
 {
     omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());

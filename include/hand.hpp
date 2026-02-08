@@ -183,19 +183,18 @@ private:
     {
         return straightTable[static_cast<std::uint16_t>(rankMask)];
     }
-    static inline constexpr uint16_t makeTwoPairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
+    static inline constexpr std::uint16_t makeTwoPairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
     {
         const std::uint16_t pairBits = top2Table[pairs];
         const std::uint16_t kickerBit = hiTable[anySuit & ~pairBits];
         return pairBits | kickerBit;
     }
 
-    static inline constexpr uint16_t makePairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
+    static inline constexpr std::uint16_t makePairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
     {
-        const std::uint16_t pairBit = hiTable[pairs];
-        const std::uint16_t kickerRanks = anySuit & ~pairBit;
+        const std::uint16_t kickerRanks = anySuit & ~pairs;
         const std::uint16_t top3Kickers = top3Table[kickerRanks];
-        const int pairRankIndex = std::countr_zero(static_cast<std::uint32_t>(pairBit));
+        const int pairRankIndex = std::countr_zero(static_cast<std::uint32_t>(pairs));
         const std::uint16_t kickerValue = top3Kickers >> 4;
         return static_cast<std::uint16_t>(pairRankIndex << 9) | kickerValue;
     }

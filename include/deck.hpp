@@ -87,7 +87,7 @@ public:
     static inline constexpr Deck createDeck(const std::initializer_list<Deck> decks) noexcept
     {
         std::uint64_t mask = 0;
-        for (const Deck& d : decks)
+        for (const Deck &d : decks)
         {
             mask |= d.m_cardsBitmask;
         }
@@ -96,7 +96,7 @@ public:
     static inline constexpr Deck createDeck(const std::vector<Deck> &decks) noexcept
     {
         std::uint64_t mask = 0;
-        for (const Deck& d : decks)
+        for (const Deck &d : decks)
         {
             mask |= d.m_cardsBitmask;
         }
@@ -105,7 +105,7 @@ public:
     static inline constexpr Deck createDeck(const std::initializer_list<Card> cards) noexcept
     {
         std::uint64_t mask = 0;
-        for (const Card& card : cards)
+        for (const Card &card : cards)
         {
             mask |= Deck::calculateCardMask(card);
         }
@@ -114,7 +114,7 @@ public:
     static inline constexpr Deck createDeck(const std::vector<Card> &cards) noexcept
     {
         std::uint64_t mask = 0;
-        for (const Card& card : cards)
+        for (const Card &card : cards)
         {
             mask |= Deck::calculateCardMask(card);
         }
@@ -180,11 +180,15 @@ public:
         m_cardsBitmask &= ~result;
         return Deck::from_mask(result);
     }
-    template<typename TRng>
+    template <typename TRng>
     inline constexpr Deck popRandomCards(TRng &rng, std::size_t count) noexcept
     {
+        if (count == 2) [[likely]]
+        {
+            return popPair(rng);
+        }
         const std::size_t total = size();
-        if (count >= total)
+        if (count >= total) [[unlikely]]
         {
             Deck all = *this;
             m_cardsBitmask = 0;
@@ -213,7 +217,7 @@ public:
         m_cardsBitmask = m_cardsBitmask & ~chosen;
         return out;
     }
-    template<typename TRng>
+    template <typename TRng>
     inline Card popRandomCard(TRng &rng)
     {
         std::uint64_t tmp = m_cardsBitmask;
