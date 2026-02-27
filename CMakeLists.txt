@@ -23,7 +23,7 @@ find_package(benchmark CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(bshoshany-thread-pool CONFIG REQUIRED)
 find_package(dlib CONFIG REQUIRED)
-find_package(GIF CONFIG REQUIRED)
+find_package(ftxui CONFIG REQUIRED)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 
@@ -33,9 +33,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE bshoshany-thread-pool::bshoshany-t
 add_executable(${PROJECT_NAME}_Game src/game.cpp)
 target_link_libraries(${PROJECT_NAME}_Game PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
 add_executable(${PROJECT_NAME}_Trainer src/train_rl.cpp)
-target_link_libraries(${PROJECT_NAME}_Trainer PRIVATE bshoshany-thread-pool::bshoshany-thread-pool dlib::dlib GIF::GIF)
+target_link_libraries(${PROJECT_NAME}_Trainer PRIVATE bshoshany-thread-pool::bshoshany-thread-pool dlib::dlib)
 add_executable(${PROJECT_NAME}_RunPolicy src/run_policy.cpp)
-target_link_libraries(${PROJECT_NAME}_RunPolicy PRIVATE bshoshany-thread-pool::bshoshany-thread-pool dlib::dlib GIF::GIF)
+target_link_libraries(${PROJECT_NAME}_RunPolicy PRIVATE
+    bshoshany-thread-pool::bshoshany-thread-pool dlib::dlib
+    ftxui::screen ftxui::dom ftxui::component)
 
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)

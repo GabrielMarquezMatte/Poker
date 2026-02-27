@@ -90,9 +90,19 @@ inline std::ostream &operator<<(std::ostream &os, const Suit suit)
     static constexpr std::array<std::string_view, 4> suits = {"Hearts", "Diamonds", "Clubs", "Spades"};
     return os << suits[getSuitIndex(suit)];
 }
+inline std::wostream &operator<<(std::wostream &os, const Suit suit)
+{
+    static constexpr std::array<std::wstring_view, 4> suits = {L"Hearts", L"Diamonds", L"Clubs", L"Spades"};
+    return os << suits[getSuitIndex(suit)];
+}
 inline std::ostream &operator<<(std::ostream &os, const Rank rank)
 {
     static constexpr std::array<std::string_view, 13> ranks = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"};
+    return os << ranks[getRankIndex(rank)];
+}
+inline std::wostream &operator<<(std::wostream &os, const Rank rank)
+{
+    static constexpr std::array<std::wstring_view, 13> ranks = {L"2", L"3", L"4", L"5", L"6", L"7", L"8", L"9", L"10", L"J", L"Q", L"K", L"A"};
     return os << ranks[getRankIndex(rank)];
 }
 inline std::ostream &operator<<(std::ostream &os, const Classification classification)
@@ -100,6 +110,13 @@ inline std::ostream &operator<<(std::ostream &os, const Classification classific
     static constexpr std::array<std::string_view, 10> classifications = {"High Card", "Pair", "Two Pair", "Three of a Kind",
                                                                          "Straight", "Flush", "Full House", "Four of a Kind",
                                                                          "Straight Flush", "Royal Flush"};
+    return os << classifications[getClassificationIndex(classification)];
+}
+inline std::wostream &operator<<(std::wostream &os, const Classification classification)
+{
+    static constexpr std::array<std::wstring_view, 10> classifications = {L"High Card", L"Pair", L"Two Pair", L"Three of a Kind",
+                                                                          L"Straight", L"Flush", L"Full House", L"Four of a Kind",
+                                                                          L"Straight Flush", L"Royal Flush"};
     return os << classifications[getClassificationIndex(classification)];
 }
 #endif // __POKER_RANK_HPP__

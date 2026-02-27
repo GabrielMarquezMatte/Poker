@@ -6,7 +6,7 @@
 #include <BS_thread_pool.hpp>
 #include <span>
 #include <thread>
-enum class GameResult
+enum class GameResult : std::uint8_t
 {
     Win,
     Lose,
@@ -80,11 +80,13 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
     Deck deck = Deck::createFullDeck();
     deck.removeCards(playerCards);
     deck.removeCards(tableCards);
+    std::random_device rd{};
     for (std::size_t i = 0; i < numThreads; ++i)
     {
-        threads.push_back(threadPool.submit_task([&, deck, i]()
+        auto rng_seed = rd();
+        threads.push_back(threadPool.submit_task([&, deck, i, rng_seed]()
                                {
-            omp::XoroShiro128Plus threadRng(std::random_device{}());
+            static thread_local omp::XoroShiro128Plus threadRng(rng_seed);
             std::size_t threadWins = 0;
             Deck threadDeck = deck;
             for (std::size_t j = 0; j < simulationsPerThread; ++j)
@@ -97,7 +99,7 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
             return threadWins; }));
     }
     std::size_t wins = 0;
-    omp::XoroShiro128Plus threadRng(std::random_device{}());
+    static thread_local omp::XoroShiro128Plus threadRng(rd());
     Deck threadDeck = deck;
     for (std::size_t i = 0; i < remainingSimulations; ++i)
     {

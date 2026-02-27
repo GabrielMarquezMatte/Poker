@@ -20,7 +20,12 @@ struct TrainConfig
     bool self_play = true;             // Train all players with the policy (not just player 0)
     float allin_penalty = 0.3f;        // Penalty for excessive all-in usage
     int max_allin_ratio = 30;          // Max percentage of all-ins before penalty applies
+    float gae_lambda = 0.95f;          // GAE λ: 0=TD(0), 1=Monte Carlo
 };
+
+// Diversity thresholds for adaptive epsilon and learning-rate control
+static constexpr float kHighDiversityThreshold = 0.5f;
+static constexpr float kLowDiversityThreshold  = 0.3f;
 
 struct TrajStep
 {
@@ -74,8 +79,8 @@ float play_one_hand_collect(Game &g, TRng &rng, policy_net &net, value_net &vnet
                             std::vector<TrajStep> &out_steps,
                             double epsilon,
                             BS::thread_pool<BS::tp::none> &pool,
+                            const TrainConfig &config,
                             float temperature = 1.0f,
-                            bool self_play = true,
                             std::size_t hero_id = 0)  // Only collect for this player if not self_play
 {
     g.startNewHand(rng);
@@ -110,7 +115,7 @@ float play_one_hand_collect(Game &g, TRng &rng, policy_net &net, value_net &vnet
         float log_prob = 0.f;
         float entropy = 0.f;
         float value_est = 0.f;
-        bool use_policy = self_play || (cur == hero_id);
+        bool use_policy = config.self_play || (cur == hero_id);
         if (!use_policy)
         {
             omp::FastUniformIntDistribution<size_t> D(0, leg.size() - 1);
@@ -146,14 +151,24 @@ float play_one_hand_collect(Game &g, TRng &rng, policy_net &net, value_net &vnet
         g.applyAction(rng, to_engine_action(aidx, g, cur, blinds));
     }
     const float bb = static_cast<float>(std::max<std::uint32_t>(1, blinds.bigBlind));
-    // Compute returns and advantages
+    // Compute returns and advantages using GAE (TD-λ backwards pass).
+    // Reward is terminal-only (delta_bb at hand end); no discounting (γ = 1).
+    //   δ_t = r_t + V(s_{t+1}) − V(s_t)   (r_t = 0 for t < T, delta_bb for last step)
+    //   A_t = δ_t + λ · A_{t+1}            (backwards induction)
     for (std::size_t i = 0; i < n; ++i)
     {
         float delta_bb = (static_cast<float>(g.players()[i].chips) - static_cast<float>(chips_before[i])) / bb;
-        for (auto &st : per_actor[i])
+        auto &steps = per_actor[i];
+        float gae = 0.f;
+        for (int t = static_cast<int>(steps.size()) - 1; t >= 0; --t)
         {
-            st.R = delta_bb;
-            st.advantage = delta_bb - st.value;  // Simple advantage: R - V(s)
+            steps[t].R = delta_bb;
+            bool is_terminal = (t == static_cast<int>(steps.size()) - 1);
+            float next_val = is_terminal ? 0.f : steps[t + 1].value;
+            float reward_t = is_terminal ? delta_bb : 0.f;
+            float td_error = reward_t + next_val - steps[t].value;
+            gae = td_error + config.gae_lambda * gae;
+            steps[t].advantage = gae;
         }
     }
     for (auto &vec : per_actor)
@@ -304,8 +319,8 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
             g.resetPlayerChips(starting_chips);
         }
 
-        float reward = play_one_hand_collect(g, rng, net, vnet, blinds, traj, epsilon, pool, 
-                                             temperature, config.self_play, 0);
+        float reward = play_one_hand_collect(g, rng, net, vnet, blinds, traj, epsilon, pool,
+                                             config, temperature, 0);
         hand_rewards.push_back(reward);
         if (reward > 0)
             wins++;
@@ -356,7 +371,7 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
     // Train policy network with adjusted learning rate based on action diversity
     // Lower LR if actions are collapsing to prevent further collapse
     float policy_lr = 1e-4f;
-    if (stats.action_diversity < 0.3f)  // Low diversity - reduce learning rate
+    if (stats.action_diversity < kLowDiversityThreshold)  // Low diversity - reduce learning rate
     {
         policy_lr *= 0.5f;
     }
@@ -386,11 +401,11 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
 
     // Adaptive epsilon decay based on action diversity
     // Decay slower if actions are collapsing (need more exploration)
-    if (stats.action_diversity > 0.5f)
+    if (stats.action_diversity > kHighDiversityThreshold)
     {
         epsilon = std::max(0.05, epsilon * 0.997);  // Normal decay
     }
-    else if (stats.action_diversity > 0.3f)
+    else if (stats.action_diversity > kLowDiversityThreshold)
     {
         epsilon = std::max(0.10, epsilon * 0.999);  // Slower decay
     }

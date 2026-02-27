@@ -157,9 +157,6 @@ private:
         case GameState::Turn:
             executeRound(rng, GameState::River, 1);
             break;
-        case GameState::River:
-            m_state = GameState::Showdown;
-            break;
         default:
             break;
         }
@@ -236,8 +233,8 @@ private:
             advanceStreet(rng);
             return m_state == GameState::Finished;
         case GameState::River:
-            m_state = GameState::Showdown;
-            return false;
+            showdownAndPayout();
+            return true;
         default:
             return false;
         }
@@ -273,6 +270,10 @@ private:
             --m_playersData.toAct;
         }
         nextTurn(rng);
+        if (m_state == GameState::Finished)
+        {
+            return true;
+        }
         return bettingRoundMaybeComplete(rng) && m_state == GameState::Finished;
     }
 
@@ -400,16 +401,10 @@ public:
 
         case ActionType::Check:
         {
-            if (can_check())
+            if (!can_check())
             {
-                return advanceAndCheckComplete(rng);
+                return false; // illegal: cannot check when facing a bet
             }
-            int need = amount_to_call();
-            if (need <= 0)
-            {
-                return advanceAndCheckComplete(rng);
-            }
-            commit(current, need);
             return advanceAndCheckComplete(rng);
         }
 

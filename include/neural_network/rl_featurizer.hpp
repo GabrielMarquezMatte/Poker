@@ -7,8 +7,21 @@
 #include "../game/game.hpp"
 #include "../game.hpp"
 
-// Enhanced featurizer with 32 features for better learning
-// Uses thread pool for parallel equity calculation
+// Normalization caps for feature scaling
+static constexpr float kMaxToCallBB   = 100.f;  // to-call cap in big blinds
+static constexpr float kMaxStackBB    = 200.f;  // stack cap in big blinds
+static constexpr float kMaxBetToPot   = 3.f;    // bet-to-pot cap (3× pot)
+static constexpr float kMaxSPR        = 20.f;   // stack-to-pot ratio cap
+static constexpr float kMaxRaiseToPot = 2.f;    // min-raise-to-pot cap (2× pot)
+
+// 32-feature featurizer. Feature layout:
+//   k=0-3   : Street one-hot (PreFlop/Flop/Turn/River)
+//   k=4-9   : Betting situation (can_check, to_call, pot, pot_odds, facing_bet, bet_to_pot)
+//   k=10-15 : Stack info (hero_stack, spr, committed_ratio, avg_opp_stack, eff_stack, can_raise)
+//   k=16-18 : Game state (alive_frac, elig_frac, position)
+//   k=19    : Equity (raw Monte Carlo win probability)
+//   k=20-24 : Decision features (+EV, EV_margin, short_stack_value, fold_indicator, raise_indicator)
+//   k=25-31 : Independent structural features (see comments in code)
 inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const Blinds &blinds, BS::thread_pool<BS::tp::none> &pool)
 {
     const auto bb = std::max<std::uint32_t>(1, blinds.bigBlind);
@@ -83,42 +96,63 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x(k++) = (street_idx == 3) ? 1.f : 0.f;  // River
 
     // Betting situation (6 features)
-    x(k++) = (to_call == 0) ? 1.f : 0.f;                            // can_check
-    x(k++) = std::min(static_cast<float>(to_call) / bb_f, 100.f) / 100.f;  // to_call_bb normalized
-    x(k++) = std::min(static_cast<float>(bd.pot) / bb_f, 200.f) / 200.f;   // pot_bb normalized
-    x(k++) = pot_odds;                                               // pot odds [0, 1]
-    x(k++) = facing_bet;                                             // is facing a bet
-    x(k++) = std::min(bet_to_pot, 3.f) / 3.f;                       // bet relative to pot normalized
+    x(k++) = (to_call == 0) ? 1.f : 0.f;                                            // can_check
+    x(k++) = std::min(static_cast<float>(to_call) / bb_f, kMaxToCallBB) / kMaxToCallBB; // to_call_bb
+    x(k++) = std::min(static_cast<float>(bd.pot) / bb_f, kMaxStackBB) / kMaxStackBB;    // pot_bb
+    x(k++) = pot_odds;                                                               // pot odds [0,1]
+    x(k++) = facing_bet;                                                             // facing a bet
+    x(k++) = std::min(bet_to_pot, kMaxBetToPot) / kMaxBetToPot;                     // bet/pot ratio
 
     // Stack info (6 features)
-    x(k++) = std::min(static_cast<float>(hero.chips) / bb_f, 200.f) / 200.f;    // hero_stack_bb normalized
-    x(k++) = std::min(spr, 20.f) / 20.f;                                         // normalized SPR
-    x(k++) = committed_ratio;                                                     // commitment level
-    x(k++) = std::min(avg_opp_stack / bb_f, 200.f) / 200.f;                      // avg opp stack normalized
-    x(k++) = std::min(effective_stack / bb_f, 200.f) / 200.f;                    // effective stack normalized
-    x(k++) = can_raise;                                                           // can we raise?
+    x(k++) = std::min(static_cast<float>(hero.chips) / bb_f, kMaxStackBB) / kMaxStackBB; // hero stack
+    x(k++) = std::min(spr, kMaxSPR) / kMaxSPR;                                           // SPR
+    x(k++) = committed_ratio;                                                              // street commitment
+    x(k++) = std::min(avg_opp_stack / bb_f, kMaxStackBB) / kMaxStackBB;                  // avg opp stack
+    x(k++) = std::min(effective_stack / bb_f, kMaxStackBB) / kMaxStackBB;                // effective stack
+    x(k++) = can_raise;                                                                    // can raise
 
-    // Game state (4 features)
-    x(k++) = static_cast<float>(alive) / static_cast<float>(ps.size());   // fraction alive
-    x(k++) = static_cast<float>(elig) / static_cast<float>(ps.size());    // fraction eligible
-    x(k++) = position;                                                      // position indicator
-    x(k++) = static_cast<float>(street_idx) / 3.f;                         // street progress
+    // Game state (3 features — street_progress removed; one-hot already encodes street)
+    x(k++) = static_cast<float>(alive) / static_cast<float>(ps.size()); // fraction alive
+    x(k++) = static_cast<float>(elig) / static_cast<float>(ps.size());  // fraction eligible
+    x(k++) = position;                                                    // position indicator
 
-    // HAND STRENGTH - Most important features (6 features)
-    x(k++) = equity;                                                        // raw equity
-    x(k++) = equity * equity;                                               // squared (emphasize strong)
-    x(k++) = std::sqrt(equity);                                            // sqrt (emphasize weak differences)
-    x(k++) = (equity > 0.65f) ? 1.f : 0.f;                                 // strong hand
-    x(k++) = (equity > 0.35f && equity <= 0.65f) ? 1.f : 0.f;             // medium hand
-    x(k++) = (equity <= 0.35f) ? 1.f : 0.f;                                // weak hand
+    // Hand strength: only raw equity (1 feature)
+    // Transforms like equity² or √equity are monotone functions the network can learn itself.
+    // Discrete bins are just noisy discretizations of a value the network already has.
+    x(k++) = equity; // raw Monte Carlo win probability
 
-    // Decision-relevant derived features (6 features)
-    x(k++) = (equity > pot_odds) ? 1.f : 0.f;                              // +EV to call
-    x(k++) = std::max(0.f, equity - pot_odds);                             // EV margin
-    x(k++) = std::min(1.f, std::max(0.f, (equity - pot_odds) * 5.f));     // scaled EV margin
-    x(k++) = (equity > 0.5f && spr < 4.f) ? 1.f : 0.f;                    // short-stacked value
-    x(k++) = (equity < 0.3f && facing_bet > 0.5f) ? 1.f : 0.f;            // should fold indicator
-    x(k++) = (equity > 0.7f && can_raise > 0.5f) ? 1.f : 0.f;             // should raise indicator
+    // Decision features (5 features — scaled EV margin removed as it duplicates EV margin × 5)
+    x(k++) = (equity > pot_odds) ? 1.f : 0.f;               // +EV to call
+    x(k++) = std::max(0.f, equity - pot_odds);               // EV margin
+    x(k++) = (equity > 0.5f && spr < 4.f) ? 1.f : 0.f;     // short-stacked value spot
+    x(k++) = (equity < 0.3f && facing_bet > 0.5f) ? 1.f : 0.f; // fold indicator
+    x(k++) = (equity > 0.7f && can_raise > 0.5f) ? 1.f : 0.f;  // raise indicator
+
+    // Independent structural features (7 features — replace the 7 removed slots above)
+    // These capture information NOT derivable from equity alone.
+    const float pot_ownership = (bd.pot > 0)
+        ? std::min(static_cast<float>(hero.invested) / static_cast<float>(bd.pot), 1.f)
+        : 0.f;
+    const float min_opp_stack_norm = std::min(min_opp_chips / bb_f / kMaxStackBB, 1.f);
+    const float min_raise_fraction = std::min(
+        static_cast<float>(bd.minRaise) / static_cast<float>(std::max(1u, hero.chips)), 1.f);
+    const float min_raise_to_pot = std::min(
+        static_cast<float>(bd.minRaise) / static_cast<float>(std::max(1u, bd.pot)) / kMaxRaiseToPot, 1.f);
+    const float opp_stack_ratio = std::min(
+        min_opp_chips / std::max(1.f, static_cast<float>(hero.chips)) / 2.f, 1.f);
+    const float hero_stack_invested = static_cast<float>(hero.chips)
+        / static_cast<float>(std::max(1u, hero.chips + hero.invested));
+    const float facing_allin =
+        (static_cast<float>(bd.currentBet) >= static_cast<float>(hero.committed) + static_cast<float>(hero.chips))
+        ? 1.f : 0.f;
+
+    x(k++) = pot_ownership;      // hero's share of total pot (commitment signal)
+    x(k++) = min_opp_stack_norm; // shortest opponent stack (side-pot / shove pressure)
+    x(k++) = min_raise_fraction; // min raise cost as fraction of hero stack
+    x(k++) = min_raise_to_pot;   // min raise cost relative to pot
+    x(k++) = opp_stack_ratio;    // shortest opponent stack relative to hero
+    x(k++) = hero_stack_invested; // remaining stack / total invested (hand commitment)
+    x(k++) = facing_allin;       // 1 if a call would put hero all-in
 
     // Ensure we have exactly kInputDims (32)
     while (k < kInputDims)

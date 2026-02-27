@@ -166,6 +166,12 @@ public:
     template<typename TRng>
     inline constexpr Deck popPair(TRng &rng) noexcept
     {
+        if (size() < 2) [[unlikely]]
+        {
+            Deck all = *this;
+            m_cardsBitmask = 0;
+            return all;
+        }
         std::uint64_t tmp = m_cardsBitmask;
         std::size_t count = size();
         std::uint64_t rand_val = rng();

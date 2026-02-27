@@ -575,10 +575,226 @@ TEST(EdgeCases, FinishedGameReturnsTrue)
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(2, 10000, blinds);
     g.startNewHand(rng);
-    
+
     g.applyAction(rng, {ActionType::Fold, 0});
     EXPECT_EQ(g.state(), GameState::Finished);
-    
+
     bool result = g.applyAction(rng, {ActionType::Check, 0});
     EXPECT_TRUE(result);
+}
+
+// ========== Bug Fix Tests ==========
+
+TEST(BugFix_CheckReject, CheckFacingBetReturnsFalse)
+{
+    // Bug: Check silently committed chips when facing a bet.
+    // Fixed: returns false immediately without touching game state.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(3, 10000, blinds);
+    g.startNewHand(rng);
+
+    // On PreFlop the first actor (UTG) faces the big blind.
+    const Player &actor = g.currentPlayer();
+    ASSERT_GT(g.betData().currentBet, actor.committed)
+        << "Pre-condition: actor must be facing a live bet";
+
+    const std::size_t actor_id   = actor.id;
+    const std::uint32_t chips_before = actor.chips;
+    const std::uint32_t pot_before   = g.betData().pot;
+    const GameState state_before     = g.state();
+
+    bool result = g.applyAction(rng, {ActionType::Check, 0});
+
+    EXPECT_FALSE(result)
+        << "Illegal check must return false without advancing the game";
+    EXPECT_EQ(g.players()[actor_id].chips, chips_before)
+        << "Actor chips must not change on a rejected check";
+    EXPECT_EQ(g.betData().pot, pot_before)
+        << "Pot must not change on a rejected check";
+    EXPECT_EQ(g.state(), state_before)
+        << "Game state must not change on a rejected check";
+}
+
+TEST(BugFix_CheckReject, CheckAfterCallingIsLegal)
+{
+    // Sanity check: after everyone calls to even the bet, Check is legal.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(3, 10000, blinds);
+    g.startNewHand(rng);
+
+    // Advance past PreFlop so all committed amounts are reset.
+    while (g.state() == GameState::PreFlop)
+    {
+        g.applyAction(rng, {ActionType::Call, 0});
+    }
+    if (g.state() == GameState::Finished)
+    {
+        GTEST_SKIP() << "Hand finished before Flop";
+    }
+
+    // Now currentBet == 0, so Check is legal.
+    ASSERT_EQ(g.betData().currentBet, 0u);
+    const std::uint32_t pot_before = g.betData().pot;
+    g.applyAction(rng, {ActionType::Check, 0});
+    EXPECT_EQ(g.betData().pot, pot_before) << "Check must not add to pot";
+}
+
+TEST(BugFix_RiverCompletion, LastRiverActionReturnsTrueDirectly)
+{
+    // Bug: River set state=Showdown and returned false, forcing a spurious
+    // extra applyAction call before the showdown ran.
+    // Fixed: showdownAndPayout() is invoked directly; last River action returns true.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(2, 10000, blinds);
+    g.startNewHand(rng);
+
+    // Play through PreFlop, Flop, and Turn.
+    while (g.state() != GameState::River && g.state() != GameState::Finished)
+    {
+        const Player &p = g.currentPlayer();
+        ActionStruct a = (g.betData().currentBet > p.committed)
+            ? ActionStruct{ActionType::Call, 0}
+            : ActionStruct{ActionType::Check, 0};
+        g.applyAction(rng, a);
+    }
+
+    if (g.state() != GameState::River)
+    {
+        GTEST_SKIP() << "Hand finished before River";
+    }
+
+    // Play River actions. The last one must return true in the same call.
+    bool finished_on_action = false;
+    while (g.state() == GameState::River)
+    {
+        const Player &p = g.currentPlayer();
+        ActionStruct a = (g.betData().currentBet > p.committed)
+            ? ActionStruct{ActionType::Call, 0}
+            : ActionStruct{ActionType::Check, 0};
+        if (g.applyAction(rng, a))
+        {
+            finished_on_action = true;
+            break;
+        }
+    }
+
+    EXPECT_TRUE(finished_on_action)
+        << "The last River action must return true without an extra call";
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(g.betData().pot, 0u)
+        << "showdownAndPayout must clear the pot";
+}
+
+// ========== Showdown Payout Tests ==========
+
+TEST(ShowdownPayout, PotIsZeroAfterShowdown)
+{
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{7};
+    auto g = make_game(3, 10000, blinds);
+    g.startNewHand(rng);
+    play_all_check_call(g, rng);
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(g.betData().pot, 0u) << "Pot must be fully distributed after showdown";
+}
+
+TEST(ShowdownPayout, TotalChipsPreservedAfterShowdown)
+{
+    // Chips must be conserved when a real showdown (not a fold) decides the winner.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{7};
+    auto g = make_game(4, 5000, blinds);
+    const int initial_total = sum_chips(g.players());
+    g.startNewHand(rng);
+    play_all_check_call(g, rng);
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(sum_chips(g.players()), initial_total);
+}
+
+TEST(ShowdownPayout, WinnerChipsIncrease)
+{
+    // At least one player must end up with more chips than they had at hand start.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(2, 10000, blinds);
+
+    // Snapshot chips right before the hand (players start equal).
+    g.startNewHand(rng);
+    const std::uint32_t chips_sb = g.players()[0].chips + g.players()[0].committed;
+    const std::uint32_t chips_bb = g.players()[1].chips + g.players()[1].committed;
+
+    play_all_check_call(g, rng);
+
+    // After showdown, one (or both in a tie) player has gained chips from the pot.
+    const bool someone_gained =
+        (g.players()[0].chips > chips_sb) || (g.players()[1].chips > chips_bb);
+    EXPECT_TRUE(someone_gained) << "At least one player must gain chips from the pot";
+}
+
+// ========== All-In Fast-Forward Tests ==========
+
+TEST(AllInFastForward, BothPlayersAllInCompletesGame)
+{
+    // When all players go all-in the board must be dealt automatically and the
+    // game must reach Finished without any further player decisions.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(2, 400, blinds);
+    const int initial_total = sum_chips(g.players());
+    g.startNewHand(rng);
+
+    // Drive applyAction until Finished; the AllIn action is ignored on
+    // street-transition calls where current == n.
+    while (g.state() != GameState::Finished)
+    {
+        g.applyAction(rng, {ActionType::AllIn, 0});
+    }
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(g.betData().pot, 0u);
+    EXPECT_EQ(sum_chips(g.players()), initial_total);
+}
+
+TEST(AllInFastForward, ShortStackForcedAllInSidePotChipsConserved)
+{
+    // A player too short to cover the big blind is forced all-in on the blind.
+    // This creates a side pot between the two full-stacked players.
+    // Verifies that the multi-pot payout conserves total chips end-to-end.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{13};
+    Game g(Blinds{50, 100});
+    g.addPlayer(10000);
+    g.addPlayer(10000);
+    g.addPlayer(60); // covers only part of the big blind — forced all-in
+    const int initial_total = sum_chips(g.players());
+    g.startNewHand(rng);
+    play_all_check_call(g, rng);
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(g.betData().pot, 0u);
+    EXPECT_EQ(sum_chips(g.players()), initial_total);
+}
+
+TEST(AllInFastForward, ThreeWayAllInChipsConserved)
+{
+    // All three players shove on PreFlop — no player actions on later streets.
+    constexpr Blinds blinds{50, 100};
+    omp::XoroShiro128Plus rng{99};
+    auto g = make_game(3, 500, blinds);
+    const int initial_total = sum_chips(g.players());
+    g.startNewHand(rng);
+
+    while (g.state() != GameState::Finished)
+    {
+        g.applyAction(rng, {ActionType::AllIn, 0});
+    }
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(g.betData().pot, 0u);
+    EXPECT_EQ(sum_chips(g.players()), initial_total);
 }
