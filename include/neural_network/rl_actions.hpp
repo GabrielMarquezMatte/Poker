@@ -24,28 +24,49 @@ inline std::vector<unsigned> legal_actions(const Game &g, std::size_t heroIdx, c
     if (!p.alive())
         return a;
 
-    // Fold always legal (even vs zero bet, albeit silly)
-    a.push_back(A_Fold);
+    const std::uint32_t to_call =
+        (bd.currentBet > p.committed) ? (bd.currentBet - p.committed) : 0;
+    const std::uint32_t stack_total = p.committed + p.chips;
+    const std::uint32_t pot = std::max<std::uint32_t>(1, bd.pot);
 
-    // Check or Call
-    if (bd.currentBet > p.committed)
-    {
-        if (p.chips + p.committed >= bd.currentBet)
-            a.push_back(A_CheckCall);
-        else
-            a.push_back(A_AllIn); // can't call fully => shove is the only way to continue
-    }
-    else
-    {
-        a.push_back(A_CheckCall); // as Check
-    }
+    // Only allow fold when actually facing a bet.
+    if (to_call > 0)
+        a.push_back(A_Fold);
 
-    // Bet/Raise (discretized)
-    auto add_bet = [&](unsigned idx)
-    { if (std::find(a.begin(), a.end(), idx)==a.end()) a.push_back(idx); };
-    add_bet(A_BetHalfPot);
-    add_bet(A_BetPot);
-    add_bet(A_AllIn);
+    // Check or Call (to_engine_action maps short-call to all-in automatically).
+    a.push_back(A_CheckCall);
+
+    auto add_unique = [&](unsigned idx)
+    {
+        if (std::find(a.begin(), a.end(), idx) == a.end())
+            a.push_back(idx);
+    };
+    auto can_target_without_shoving = [&](std::uint32_t target) -> bool
+    {
+        return target > p.committed && target < stack_total;
+    };
+
+    // Add size actions only if they represent a distinct non-all-in target.
+    const std::uint32_t half_target = (bd.currentBet == 0)
+        ? std::max<std::uint32_t>(bd.minRaise, pot / 2)
+        : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot / 2);
+    const std::uint32_t pot_target = (bd.currentBet == 0)
+        ? std::max<std::uint32_t>(bd.minRaise, pot)
+        : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot);
+    if (can_target_without_shoving(half_target))
+        add_unique(A_BetHalfPot);
+    if (can_target_without_shoving(pot_target))
+        add_unique(A_BetPot);
+
+    // Keep explicit shove for short-stack / low-SPR / pot-committed spots.
+    const bool low_spr_spot = p.chips <= (bd.pot + to_call);
+    const std::uint32_t remaining_after_call = p.chips - std::min(p.chips, to_call);
+    const bool pot_committed =
+        (to_call > 0) &&
+        (remaining_after_call <= std::max<std::uint32_t>(bd.minRaise, bd.pot / 2));
+    const bool short_stack = p.chips <= 2u * std::max<std::uint32_t>(1, bd.minRaise);
+    if (low_spr_spot || pot_committed || short_stack)
+        add_unique(A_AllIn);
 
     return a;
 }

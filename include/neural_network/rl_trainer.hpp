@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <numeric>
 #include <algorithm>
+#include <cmath>
 #include <BS_thread_pool.hpp>
 #include "dlib_policy.hpp"
 #include "rl_featurizer.hpp"
@@ -193,27 +194,28 @@ inline void build_training_batch(
     if (traj.empty())
         return;
 
-    // Count actions to detect collapse
+    // Count actions to detect collapse.
     std::array<int, kNumActions> action_counts = {};
     for (const auto &t : traj)
         action_counts[t.a]++;
-    
-    int total_actions = static_cast<int>(traj.size());
 
-    // Compute normalized advantages with entropy bonus and all-in penalty
+    int total_actions = static_cast<int>(traj.size());
+    const float allin_ratio = (total_actions > 0)
+        ? (100.f * static_cast<float>(action_counts[A_AllIn]) / static_cast<float>(total_actions))
+        : 0.f;
+
+    // Compute normalized advantages with entropy bonus and all-in overuse penalty.
     std::vector<float> adv(traj.size());
     for (size_t i = 0; i < traj.size(); ++i)
     {
         adv[i] = traj[i].advantage;
-        
-        // Add entropy bonus to advantage (encourages exploration)
+        // Encourage higher-entropy decision points.
         adv[i] += config.entropy_coef * traj[i].entropy;
-        if (traj[i].a != 4) // Not all-in
+        if (traj[i].a != A_AllIn)
         {
             continue;
         }
-        // Penalize all-in if it's being overused
-        float allin_ratio = static_cast<float>(action_counts[4]) / static_cast<float>(total_actions) * 100.f;
+        // Penalize all-in labels when action distribution is already all-in heavy.
         if (allin_ratio > static_cast<float>(config.max_allin_ratio))
         {
             adv[i] -= config.allin_penalty * (allin_ratio - config.max_allin_ratio) / 100.f;
@@ -238,45 +240,82 @@ inline void build_training_batch(
     for (float &v : adv)
         v = (v - mu) / sd;
 
-    // Build batches - INCLUDE ALL SAMPLES to prevent collapse
-    X_policy.reserve(X_policy.size() + traj.size() * 2);
-    y_policy.reserve(y_policy.size() + traj.size() * 2);
+    // Build batches.
+    X_policy.reserve(X_policy.size() + traj.size() * 3);
+    y_policy.reserve(y_policy.size() + traj.size() * 3);
     X_value.reserve(X_value.size() + traj.size());
     y_value.reserve(y_value.size() + traj.size());
-    advantages_out.reserve(advantages_out.size() + traj.size() * 2);
+    advantages_out.reserve(advantages_out.size() + traj.size() * 3);
+
+    // Cap explicit all-in supervision to avoid label collapse.
+    const std::size_t max_allin_policy_samples =
+        std::max<std::size_t>(
+            1,
+            static_cast<std::size_t>(std::ceil(
+                static_cast<double>(traj.size()) *
+                static_cast<double>(std::max(1, config.max_allin_ratio)) / 100.0)));
+    std::size_t kept_allin_policy = 0;
 
     for (size_t i = 0; i < traj.size(); ++i)
     {
         const auto &t = traj[i];
         const float a = adv[i];
 
-        // Include ALL samples for policy learning (key change!)
-        X_policy.push_back(t.s);
-        y_policy.push_back(t.a);
-        advantages_out.push_back(a);
+        // Value network still learns from all states.
+        X_value.push_back(t.s);
+        y_value.push_back(t.R);
 
-        // For positive advantage, add extra samples (but limit to prevent overfit)
-        if (a > 0.5f)
+        // Policy network should focus on favorable actions instead of cloning every sample.
+        // Keep a sparse subset of non-positive advantages as a stabilizer.
+        bool keep_for_policy = (a > 0.f) || ((i % 20u) == 0u);
+        if (!keep_for_policy)
+        {
+            continue;
+        }
+
+        if (t.a == A_AllIn)
+        {
+            // Require clearly positive advantage for shove labels.
+            if (a <= 0.25f)
+            {
+                continue;
+            }
+            if (kept_allin_policy >= max_allin_policy_samples)
+            {
+                continue;
+            }
+            ++kept_allin_policy;
+        }
+
+        int repeats = 1;
+        if (a > 0.5f) ++repeats;
+        if (a > 1.0f) ++repeats;
+        if (t.a == A_AllIn)
+        {
+            // Avoid multiplying shove labels even when advantage spikes.
+            repeats = 1;
+        }
+
+        for (int r = 0; r < repeats; ++r)
         {
             X_policy.push_back(t.s);
             y_policy.push_back(t.a);
-            advantages_out.push_back(a * 0.5f);
+            advantages_out.push_back(a / static_cast<float>(r + 1));
         }
-
-        // For value network: always include all samples
-        X_value.push_back(t.s);
-        y_value.push_back(t.R);
     }
-    
-    // Add diversity-encouraging samples for underrepresented actions
+
+    // Add diversity-encouraging reinforcement for rare, successful non-all-in actions.
     for (size_t i = 0; i < traj.size(); ++i)
     {
         const auto &t = traj[i];
-        unsigned action = t.a;
-        
-        // If this action is rare but was successful, reinforce it more
+        const unsigned action = t.a;
+        if (action == A_AllIn)
+        {
+            continue;
+        }
+
         float action_freq = static_cast<float>(action_counts[action]) / static_cast<float>(total_actions);
-        if (action_freq < 0.1f && t.R > 0.f && action != 4)  // Rare non-allin winning action
+        if (action_freq < 0.1f && t.R > 0.f && adv[i] > 0.5f)
         {
             X_policy.push_back(t.s);
             y_policy.push_back(t.a);
