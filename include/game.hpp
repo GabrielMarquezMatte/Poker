@@ -34,6 +34,35 @@ inline constexpr GameResult compareHands(const Deck playerCards, const Deck tabl
     }
     return GameResult::Win;
 }
+template<typename TRng>
+inline constexpr GameResult compareRandomHands(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers) noexcept
+{
+    std::size_t numCardsToDeal = 5 - tableCards.size();
+    if (numCardsToDeal)
+    {
+        tableCards.addCards(deck.popRandomCards(rng, numCardsToDeal));
+    }
+    ClassificationResult playerResult = Hand::classify(Deck::createDeck({playerCards, tableCards}));
+    bool sawTie = false;
+    for (std::size_t i = 0; i < numPlayers - 1; ++i)
+    {
+        Deck opponent = deck.popPair(rng);
+        ClassificationResult opponentResult = Hand::classify(Deck::createDeck({opponent, tableCards}));
+        if (opponentResult > playerResult)
+        {
+            return GameResult::Lose;
+        }
+        if (opponentResult == playerResult)
+        {
+            sawTie = true;
+        }
+    }
+    if (sawTie)
+    {
+        return GameResult::Tie;
+    }
+    return GameResult::Win;
+}
 template <typename TRng>
 inline bool playerWinsRandomGame(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers)
 {
@@ -113,5 +142,103 @@ inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards
         wins += thread.get();
     }
     return static_cast<double>(wins) / numSimulations;
+}
+struct GameStatistics
+{
+    std::size_t wins = 0;
+    std::size_t losses = 0;
+    std::size_t ties = 0;
+    inline constexpr std::size_t totalGames() const noexcept
+    {
+        return wins + losses + ties;
+    }
+};
+template <typename TRng>
+inline GameStatistics computeRandomGameStatistics(TRng &rng, const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
+{
+    GameStatistics stats;
+    Deck deck = Deck::createFullDeck();
+    deck.removeCards(playerCards);
+    deck.removeCards(tableCards);
+    for (std::size_t i = 0; i < numSimulations; ++i)
+    {
+        GameResult result = compareRandomHands(rng, playerCards, tableCards, deck, numPlayers);
+        switch (result)
+        {
+        case GameResult::Win:
+            ++stats.wins;
+            break;
+        case GameResult::Lose:
+            ++stats.losses;
+            break;
+        case GameResult::Tie:
+            ++stats.ties;
+            break;
+        }
+    }
+    return stats;
+}
+inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+{
+    std::size_t numThreads = threadPool.get_thread_count();
+    std::size_t simulationsPerThread = numSimulations / numThreads;
+    std::vector<std::future<GameStatistics>> threads;
+    threads.reserve(numThreads);
+    std::size_t remainingSimulations = numSimulations % numThreads;
+    Deck deck = Deck::createFullDeck();
+    deck.removeCards(playerCards);
+    deck.removeCards(tableCards);
+    for (std::size_t i = 0; i < numThreads; ++i)
+    {
+        threads.push_back(threadPool.submit_task([&, deck, i]()
+                               {
+            omp::XoroShiro128Plus threadRng(std::random_device{}());
+            GameStatistics threadStats;
+            Deck threadDeck = deck;
+            for (std::size_t j = 0; j < simulationsPerThread; ++j)
+            {
+                GameResult result = compareRandomHands(threadRng, playerCards, tableCards, threadDeck, numPlayers);
+                switch (result)
+                {
+                case GameResult::Win:
+                    ++threadStats.wins;
+                    break;
+                case GameResult::Lose:
+                    ++threadStats.losses;
+                    break;
+                case GameResult::Tie:
+                    ++threadStats.ties;
+                    break;
+                }
+            }
+            return threadStats; }));
+    }
+    GameStatistics stats;
+    omp::XoroShiro128Plus threadRng(std::random_device{}());
+    Deck threadDeck = deck;
+    for (std::size_t i = 0; i < remainingSimulations; ++i)
+    {
+        GameResult result = compareRandomHands(threadRng, playerCards, tableCards, threadDeck, numPlayers);
+        switch (result)
+        {
+        case GameResult::Win:
+            ++stats.wins;
+            break;
+        case GameResult::Lose:
+            ++stats.losses;
+            break;
+        case GameResult::Tie:
+            ++stats.ties;
+            break;
+        }
+    }
+    for (auto &thread : threads)
+    {
+        GameStatistics threadStats = thread.get();
+        stats.wins += threadStats.wins;
+        stats.losses += threadStats.losses;
+        stats.ties += threadStats.ties;
+    }
+    return stats;
 }
 #endif // __POKER_GAME_HPP__

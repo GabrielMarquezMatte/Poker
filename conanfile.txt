@@ -4,6 +4,8 @@ benchmark/1.9.4
 bshoshany-thread-pool/5.0.0
 dlib/19.24.2
 ftxui/6.1.9
+drogon/1.9.12
+glaze/7.0.2
 
 [generators]
 CMakeDeps

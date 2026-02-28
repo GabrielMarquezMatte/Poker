@@ -24,6 +24,8 @@ find_package(GTest CONFIG REQUIRED)
 find_package(bshoshany-thread-pool CONFIG REQUIRED)
 find_package(dlib CONFIG REQUIRED)
 find_package(ftxui CONFIG REQUIRED)
+find_package(Drogon CONFIG REQUIRED)
+find_package(glaze CONFIG REQUIRED)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/test)
 
@@ -41,3 +43,6 @@ target_link_libraries(${PROJECT_NAME}_RunPolicy PRIVATE
 
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)
+
+add_executable(${PROJECT_NAME}_Api src/api.cpp)
+target_link_libraries(${PROJECT_NAME}_Api PRIVATE Drogon::Drogon bshoshany-thread-pool::bshoshany-thread-pool glaze::glaze)
