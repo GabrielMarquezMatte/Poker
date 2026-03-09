@@ -30,6 +30,10 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     const auto &hero = ps[heroIdx];
     const auto &bd = g.betData();
 
+    // Clamp-and-normalise helpers: norm(v, cap) → [0,1]; norm_bb divides by bb first.
+    auto norm    = [](float v, float cap) { return std::min(v, cap) / cap; };
+    auto norm_bb = [&](float v, float cap) { return norm(v / bb_f, cap); };
+
     // Player counts
     int alive = 0, elig = 0;
     float total_opp_chips = 0.f;
@@ -54,8 +58,8 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     // Betting situation
     std::uint32_t to_call = (bd.currentBet > hero.committed) ? (bd.currentBet - hero.committed) : 0;
     float pot_odds = (bd.pot + to_call > 0) ? static_cast<float>(to_call) / static_cast<float>(bd.pot + to_call) : 0.f;
-    float spr = (bd.pot > 0) ? static_cast<float>(hero.chips) / static_cast<float>(bd.pot) : 20.f;
-    spr = std::min(spr, 20.f);
+    float spr = (bd.pot > 0) ? static_cast<float>(hero.chips) / static_cast<float>(bd.pot) : kMaxSPR;
+    spr = std::min(spr, kMaxSPR);
 
     // Effective stack (minimum of hero and average opponent)
     float effective_stack = std::min(static_cast<float>(hero.chips), avg_opp_stack);
@@ -72,7 +76,7 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     }
 
     // Equity calculation - multithreaded for better performance
-    constexpr int equity_sims = 5000;
+    constexpr int equity_sims = 500;
     float equity = static_cast<float>(probabilityOfWinning(hero.hole, g.board(), equity_sims, ps.size() - 1, pool));
 
     // Betting indicators
@@ -96,20 +100,20 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x(k++) = (street_idx == 3) ? 1.f : 0.f;  // River
 
     // Betting situation (6 features)
-    x(k++) = (to_call == 0) ? 1.f : 0.f;                                            // can_check
-    x(k++) = std::min(static_cast<float>(to_call) / bb_f, kMaxToCallBB) / kMaxToCallBB; // to_call_bb
-    x(k++) = std::min(static_cast<float>(bd.pot) / bb_f, kMaxStackBB) / kMaxStackBB;    // pot_bb
-    x(k++) = pot_odds;                                                               // pot odds [0,1]
-    x(k++) = facing_bet;                                                             // facing a bet
-    x(k++) = std::min(bet_to_pot, kMaxBetToPot) / kMaxBetToPot;                     // bet/pot ratio
+    x(k++) = (to_call == 0) ? 1.f : 0.f;                                // can_check
+    x(k++) = norm_bb(static_cast<float>(to_call), kMaxToCallBB);        // to_call_bb
+    x(k++) = norm_bb(static_cast<float>(bd.pot),  kMaxStackBB);         // pot_bb
+    x(k++) = pot_odds;                                                   // pot odds [0,1]
+    x(k++) = facing_bet;                                                 // facing a bet
+    x(k++) = norm(bet_to_pot, kMaxBetToPot);                            // bet/pot ratio
 
     // Stack info (6 features)
-    x(k++) = std::min(static_cast<float>(hero.chips) / bb_f, kMaxStackBB) / kMaxStackBB; // hero stack
-    x(k++) = std::min(spr, kMaxSPR) / kMaxSPR;                                           // SPR
-    x(k++) = committed_ratio;                                                              // street commitment
-    x(k++) = std::min(avg_opp_stack / bb_f, kMaxStackBB) / kMaxStackBB;                  // avg opp stack
-    x(k++) = std::min(effective_stack / bb_f, kMaxStackBB) / kMaxStackBB;                // effective stack
-    x(k++) = can_raise;                                                                    // can raise
+    x(k++) = norm_bb(static_cast<float>(hero.chips), kMaxStackBB);      // hero stack
+    x(k++) = norm(spr, kMaxSPR);                                        // SPR
+    x(k++) = committed_ratio;                                            // street commitment
+    x(k++) = norm_bb(avg_opp_stack, kMaxStackBB);                       // avg opp stack
+    x(k++) = norm_bb(effective_stack, kMaxStackBB);                     // effective stack
+    x(k++) = can_raise;                                                  // can raise
 
     // Game state (3 features — street_progress removed; one-hot already encodes street)
     x(k++) = static_cast<float>(alive) / static_cast<float>(ps.size()); // fraction alive
@@ -133,7 +137,7 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     const float pot_ownership = (bd.pot > 0)
         ? std::min(static_cast<float>(hero.invested) / static_cast<float>(bd.pot), 1.f)
         : 0.f;
-    const float min_opp_stack_norm = std::min(min_opp_chips / bb_f / kMaxStackBB, 1.f);
+    const float min_opp_stack_norm = norm_bb(min_opp_chips, kMaxStackBB);
     const float min_raise_fraction = std::min(
         static_cast<float>(bd.minRaise) / static_cast<float>(std::max(1u, hero.chips)), 1.f);
     const float min_raise_to_pot = std::min(

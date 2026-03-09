@@ -101,6 +101,22 @@ int main()
         constexpr int hands_per_epoch = 300;   // More hands per epoch
         constexpr int checkpoint_interval = 100;
 
+        // Persistent trainers: reusing them across epochs preserves SGD momentum
+        // between updates, which gives smoother convergence than resetting each epoch.
+        dlib::dnn_trainer<policy_net> policy_trainer(pnet, dlib::sgd(0.0005, 0.9));
+        policy_trainer.set_learning_rate(1e-4f);
+        policy_trainer.set_min_learning_rate(1e-6f);
+        policy_trainer.set_max_num_epochs(1);
+        policy_trainer.set_iterations_without_progress_threshold(200);
+        policy_trainer.be_quiet();
+
+        dlib::dnn_trainer<value_net> value_trainer(vnet, dlib::sgd(0.0005, 0.9));
+        value_trainer.set_learning_rate(5e-4f);
+        value_trainer.set_min_learning_rate(1e-6f);
+        value_trainer.set_max_num_epochs(1);
+        value_trainer.set_iterations_without_progress_threshold(200);
+        value_trainer.be_quiet();
+
         std::cout << "Training " << total_epochs << " epochs, "
                   << hands_per_epoch << " hands/epoch" << std::endl;
         std::cout << "Initial epsilon: " << epsilon
@@ -118,7 +134,8 @@ int main()
             // Gradually decrease temperature for exploitation (but keep it higher)
             float current_temp = std::max(1.0f, temperature * static_cast<float>(std::pow(0.999, epoch)));
 
-            auto stats = train_epoch(pnet, vnet, g, rng, blinds, hands_per_epoch,
+            auto stats = train_epoch(pnet, vnet, policy_trainer, value_trainer,
+                                     g, rng, blinds, hands_per_epoch,
                                      epsilon, current_temp, starting_chips, pool, config);
 
             // Exponential moving average

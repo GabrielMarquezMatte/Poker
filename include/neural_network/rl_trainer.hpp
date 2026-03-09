@@ -136,8 +136,8 @@ float play_one_hand_collect(Game &g, TRng &rng, policy_net &net, value_net &vnet
         }
         else
         {
-            aidx = policy_sample(net, s, leg, exrng, temperature);
-            auto probs = get_action_probs(net, s, leg);
+            auto [sampled, probs] = policy_sample_with_probs(net, s, leg, exrng, temperature);
+            aidx = sampled;
             log_prob = std::log(std::max(1e-8f, probs[aidx]));
             entropy = compute_entropy(probs);
         }
@@ -194,7 +194,14 @@ inline void build_training_batch(
     if (traj.empty())
         return;
 
-    // Count actions to detect collapse.
+    // Advantage-adjustment thresholds
+    constexpr float    kMinShoveAdvantage = 0.25f; // Minimum adj_adv to keep a shove label
+    constexpr float    kAdvRepeat1        = 0.5f;  // Add one extra copy above this advantage
+    constexpr float    kAdvRepeat2        = 1.0f;  // Add two extra copies above this advantage
+    constexpr unsigned kNegAdvKeepEvery   = 20u;   // Keep 1-in-N non-positive samples as stabilizer
+    constexpr float    kRareActionFreq    = 0.1f;  // Action is "rare" below this frequency
+
+    // Phase 1: Count actions to detect distribution collapse.
     std::array<int, kNumActions> action_counts = {};
     for (const auto &t : traj)
         action_counts[t.a]++;
@@ -204,43 +211,33 @@ inline void build_training_batch(
         ? (100.f * static_cast<float>(action_counts[A_AllIn]) / static_cast<float>(total_actions))
         : 0.f;
 
-    // Compute normalized advantages with entropy bonus and all-in overuse penalty.
-    std::vector<float> adv(traj.size());
+    // Phase 2: Compute adjusted advantages (GAE + entropy bonus ± all-in penalty).
+    std::vector<float> adj_adv(traj.size());
     for (size_t i = 0; i < traj.size(); ++i)
     {
-        adv[i] = traj[i].advantage;
+        adj_adv[i] = traj[i].advantage;
         // Encourage higher-entropy decision points.
-        adv[i] += config.entropy_coef * traj[i].entropy;
+        adj_adv[i] += config.entropy_coef * traj[i].entropy;
         if (traj[i].a != A_AllIn)
-        {
             continue;
-        }
         // Penalize all-in labels when action distribution is already all-in heavy.
         if (allin_ratio > static_cast<float>(config.max_allin_ratio))
-        {
-            adv[i] -= config.allin_penalty * (allin_ratio - config.max_allin_ratio) / 100.f;
-        }
+            adj_adv[i] -= config.allin_penalty * (allin_ratio - config.max_allin_ratio) / 100.f;
     }
 
-    // Normalize advantages (mean 0, std 1)
+    // Phase 3: Normalize adjusted advantages (zero mean, unit variance).
     float mu = 0.f;
-    for (float v : adv)
-        mu += v;
-    mu /= static_cast<float>(adv.size());
+    for (float v : adj_adv) mu += v;
+    mu /= static_cast<float>(adj_adv.size());
 
     float var = 0.f;
-    for (float v : adv)
-    {
-        float d = v - mu;
-        var += d * d;
-    }
-    var /= static_cast<float>(std::max<size_t>(1, adv.size()));
+    for (float v : adj_adv) { float d = v - mu; var += d * d; }
+    var /= static_cast<float>(std::max<size_t>(1, adj_adv.size()));
     float sd = std::sqrt(std::max(1e-6f, var));
 
-    for (float &v : adv)
-        v = (v - mu) / sd;
+    for (float &v : adj_adv) v = (v - mu) / sd;
 
-    // Build batches.
+    // Phase 4: Build policy and value batches.
     X_policy.reserve(X_policy.size() + traj.size() * 3);
     y_policy.reserve(y_policy.size() + traj.size() * 3);
     X_value.reserve(X_value.size() + traj.size());
@@ -259,41 +256,31 @@ inline void build_training_batch(
     for (size_t i = 0; i < traj.size(); ++i)
     {
         const auto &t = traj[i];
-        const float a = adv[i];
+        const float a = adj_adv[i];
 
         // Value network still learns from all states.
         X_value.push_back(t.s);
         y_value.push_back(t.R);
 
-        // Policy network should focus on favorable actions instead of cloning every sample.
-        // Keep a sparse subset of non-positive advantages as a stabilizer.
-        bool keep_for_policy = (a > 0.f) || ((i % 20u) == 0u);
-        if (!keep_for_policy)
-        {
+        // Policy network focuses on favorable actions; keep sparse negatives as a stabilizer.
+        if (a <= 0.f && (i % kNegAdvKeepEvery) != 0u)
             continue;
-        }
 
         if (t.a == A_AllIn)
         {
             // Require clearly positive advantage for shove labels.
-            if (a <= 0.25f)
-            {
+            if (a <= kMinShoveAdvantage || kept_allin_policy >= max_allin_policy_samples)
                 continue;
-            }
-            if (kept_allin_policy >= max_allin_policy_samples)
-            {
-                continue;
-            }
             ++kept_allin_policy;
         }
 
+        // Higher-advantage samples repeat to increase their gradient contribution.
+        // Shove labels are never repeated to avoid over-amplifying all-in gradient.
         int repeats = 1;
-        if (a > 0.5f) ++repeats;
-        if (a > 1.0f) ++repeats;
-        if (t.a == A_AllIn)
+        if (t.a != A_AllIn)
         {
-            // Avoid multiplying shove labels even when advantage spikes.
-            repeats = 1;
+            if (a > kAdvRepeat1) ++repeats;
+            if (a > kAdvRepeat2) ++repeats;
         }
 
         for (int r = 0; r < repeats; ++r)
@@ -304,28 +291,28 @@ inline void build_training_batch(
         }
     }
 
-    // Add diversity-encouraging reinforcement for rare, successful non-all-in actions.
+    // Phase 5: Reinforce rare, successful non-all-in actions to maintain diversity.
     for (size_t i = 0; i < traj.size(); ++i)
     {
         const auto &t = traj[i];
-        const unsigned action = t.a;
-        if (action == A_AllIn)
-        {
+        if (t.a == A_AllIn)
             continue;
-        }
 
-        float action_freq = static_cast<float>(action_counts[action]) / static_cast<float>(total_actions);
-        if (action_freq < 0.1f && t.R > 0.f && adv[i] > 0.5f)
+        float action_freq = static_cast<float>(action_counts[t.a]) / static_cast<float>(total_actions);
+        if (action_freq < kRareActionFreq && t.R > 0.f && adj_adv[i] > kAdvRepeat1)
         {
             X_policy.push_back(t.s);
             y_policy.push_back(t.a);
-            advantages_out.push_back(std::max(0.5f, adv[i]));
+            advantages_out.push_back(std::max(kAdvRepeat1, adj_adv[i]));
         }
     }
 }
 
 template <class TRng>
-EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
+EpochStats train_epoch(policy_net &net, value_net &vnet,
+                       dlib::dnn_trainer<policy_net> &policy_trainer,
+                       dlib::dnn_trainer<value_net> &value_trainer,
+                       Game &g, TRng &rng,
                        const Blinds &blinds, int hands_per_epoch,
                        double &epsilon, float temperature,
                        std::uint32_t starting_chips,
@@ -410,33 +397,16 @@ EpochStats train_epoch(policy_net &net, value_net &vnet, Game &g, TRng &rng,
     // Train policy network with adjusted learning rate based on action diversity
     // Lower LR if actions are collapsing to prevent further collapse
     float policy_lr = 1e-4f;
-    if (stats.action_diversity < kLowDiversityThreshold)  // Low diversity - reduce learning rate
-    {
+    if (stats.action_diversity < kLowDiversityThreshold)
         policy_lr *= 0.5f;
-    }
 
-    {
-        dlib::dnn_trainer<policy_net> trainer(net, dlib::sgd(0.0005, 0.9));
-        trainer.set_learning_rate(policy_lr);
-        trainer.set_min_learning_rate(1e-6);
-        trainer.set_mini_batch_size(std::min<size_t>(256, X_policy.size()));
-        trainer.set_max_num_epochs(1);
-        trainer.be_quiet();
-        trainer.set_iterations_without_progress_threshold(200);
-        trainer.train(X_policy, y_policy);
-    }
+    policy_trainer.set_learning_rate(policy_lr);
+    policy_trainer.set_mini_batch_size(std::min<size_t>(256, X_policy.size()));
+    policy_trainer.train(X_policy, y_policy);
 
     // Train value network
-    {
-        dlib::dnn_trainer<value_net> trainer(vnet, dlib::sgd(0.0005, 0.9));
-        trainer.set_learning_rate(5e-4);
-        trainer.set_min_learning_rate(1e-6);
-        trainer.set_mini_batch_size(std::min<size_t>(256, X_value.size()));
-        trainer.set_max_num_epochs(1);
-        trainer.be_quiet();
-        trainer.set_iterations_without_progress_threshold(200);
-        trainer.train(X_value, y_value);
-    }
+    value_trainer.set_mini_batch_size(std::min<size_t>(256, X_value.size()));
+    value_trainer.train(X_value, y_value);
 
     // Adaptive epsilon decay based on action diversity
     // Decay slower if actions are collapsing (need more exploration)

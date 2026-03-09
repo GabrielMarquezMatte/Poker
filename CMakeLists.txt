@@ -44,5 +44,11 @@ target_link_libraries(${PROJECT_NAME}_RunPolicy PRIVATE
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)
 
+add_executable(${PROJECT_NAME}_MLBenchmark src/ml_benchmarks.cpp)
+target_link_libraries(${PROJECT_NAME}_MLBenchmark PRIVATE
+    benchmark::benchmark benchmark::benchmark_main
+    bshoshany-thread-pool::bshoshany-thread-pool
+    dlib::dlib)
+
 add_executable(${PROJECT_NAME}_Api src/api.cpp)
 target_link_libraries(${PROJECT_NAME}_Api PRIVATE Drogon::Drogon bshoshany-thread-pool::bshoshany-thread-pool glaze::glaze)

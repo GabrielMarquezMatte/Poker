@@ -5,119 +5,123 @@
 #include <algorithm>
 #include "../game/game.hpp"
 
-// Discrete action indices:
+// Discrete action indices used throughout the RL pipeline
 enum ActIdx : unsigned
 {
-    A_Fold = 0,
-    A_CheckCall = 1,
+    A_Fold       = 0,
+    A_CheckCall  = 1,
     A_BetHalfPot = 2,
-    A_BetPot = 3,
-    A_AllIn = 4,
-    A_COUNT = 5
+    A_BetPot     = 3,
+    A_AllIn      = 4,
+    A_COUNT      = 5
 };
 
+// Returns the set of legal abstract actions for `heroIdx` in the current game state.
 inline std::vector<unsigned> legal_actions(const Game &g, std::size_t heroIdx, const Blinds & /*blinds*/)
 {
-    std::vector<unsigned> a;
-    auto const &p = g.players()[heroIdx];
-    auto const &bd = g.betData();
+    std::vector<unsigned> actions;
+    const auto &p  = g.players()[heroIdx];
+    const auto &bd = g.betData();
+
     if (!p.alive())
-        return a;
+        return actions;
 
-    const std::uint32_t to_call =
-        (bd.currentBet > p.committed) ? (bd.currentBet - p.committed) : 0;
+    const std::uint32_t to_call    = (bd.currentBet > p.committed) ? (bd.currentBet - p.committed) : 0u;
     const std::uint32_t stack_total = p.committed + p.chips;
-    const std::uint32_t pot = std::max<std::uint32_t>(1, bd.pot);
+    const std::uint32_t pot         = std::max<std::uint32_t>(1, bd.pot);
 
-    // Only allow fold when actually facing a bet.
+    // Fold is only meaningful when there is a live bet to face
     if (to_call > 0)
-        a.push_back(A_Fold);
+        actions.push_back(A_Fold);
 
-    // Check or Call (to_engine_action maps short-call to all-in automatically).
-    a.push_back(A_CheckCall);
+    // Check/Call is always available (to_engine_action handles the short-call → all-in case)
+    actions.push_back(A_CheckCall);
 
-    auto add_unique = [&](unsigned idx)
+    // Append an action only if it is not already in the list
+    auto add_if_new = [&](unsigned idx)
     {
-        if (std::find(a.begin(), a.end(), idx) == a.end())
-            a.push_back(idx);
+        if (std::find(actions.begin(), actions.end(), idx) == actions.end())
+            actions.push_back(idx);
     };
-    auto can_target_without_shoving = [&](std::uint32_t target) -> bool
+
+    // A bet/raise target is "non-shove" when it is strictly between committed and stack
+    auto is_non_shove_target = [&](std::uint32_t target) -> bool
     {
         return target > p.committed && target < stack_total;
     };
 
-    // Add size actions only if they represent a distinct non-all-in target.
+    // Sized bets: only offered when they land at a distinct non-all-in chip level
     const std::uint32_t half_target = (bd.currentBet == 0)
         ? std::max<std::uint32_t>(bd.minRaise, pot / 2)
         : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot / 2);
     const std::uint32_t pot_target = (bd.currentBet == 0)
         ? std::max<std::uint32_t>(bd.minRaise, pot)
         : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot);
-    if (can_target_without_shoving(half_target))
-        add_unique(A_BetHalfPot);
-    if (can_target_without_shoving(pot_target))
-        add_unique(A_BetPot);
 
-    // Keep explicit shove for short-stack / low-SPR / pot-committed spots.
-    const bool low_spr_spot = p.chips <= (bd.pot + to_call);
+    if (is_non_shove_target(half_target)) add_if_new(A_BetHalfPot);
+    if (is_non_shove_target(pot_target))  add_if_new(A_BetPot);
+
+    // All-in is surfaced when shoving is a natural option:
+    //   low_spr       — stack ≤ pot+call, pot odds justify committing
+    //   pot_committed — calling would leave too little to raise meaningfully
+    //   short_stack   — fewer than 2 min-raises remain in stack
     const std::uint32_t remaining_after_call = p.chips - std::min(p.chips, to_call);
-    const bool pot_committed =
-        (to_call > 0) &&
-        (remaining_after_call <= std::max<std::uint32_t>(bd.minRaise, bd.pot / 2));
-    const bool short_stack = p.chips <= 2u * std::max<std::uint32_t>(1, bd.minRaise);
-    if (low_spr_spot || pot_committed || short_stack)
-        add_unique(A_AllIn);
+    const bool low_spr       = p.chips <= (bd.pot + to_call);
+    const bool pot_committed = (to_call > 0) &&
+                               (remaining_after_call <= std::max<std::uint32_t>(bd.minRaise, bd.pot / 2));
+    const bool short_stack   = p.chips <= 2u * std::max<std::uint32_t>(1u, bd.minRaise);
 
-    return a;
+    if (low_spr || pot_committed || short_stack)
+        add_if_new(A_AllIn);
+
+    return actions;
 }
 
+// Translates an abstract action index into the concrete ActionStruct expected by the game engine.
 inline ActionStruct to_engine_action(unsigned idx, const Game &g, std::size_t heroIdx, const Blinds & /*blinds*/)
 {
-    auto const &p = g.players()[heroIdx];
-    auto const &bd = g.betData();
+    const auto &p  = g.players()[heroIdx];
+    const auto &bd = g.betData();
 
-    // Helper to clamp spend
-    auto clamp_add = [&](std::uint32_t target) -> std::uint32_t
+    // Returns the additional chips needed to reach `target`, capped at the player's stack
+    auto chips_to_reach = [&](std::uint32_t target) -> std::uint32_t
     {
-        if (target <= p.committed)
-            return 0;
-        std::uint32_t need = target - p.committed;
-        if (need >= p.chips)
-            return p.chips; // will be AllIn add
-        return need;
+        if (target <= p.committed) return 0;
+        const std::uint32_t need = target - p.committed;
+        return (need >= p.chips) ? p.chips : need;
     };
 
     switch (idx)
     {
     case A_Fold:
         return ActionStruct{ActionType::Fold, 0};
+
     case A_CheckCall:
     {
-        std::uint32_t to_call = (bd.currentBet > p.committed) ? (bd.currentBet - p.committed) : 0;
-        if (to_call == 0)
-            return ActionStruct{ActionType::Check, 0};
-        if (to_call >= p.chips)
-            return ActionStruct{ActionType::AllIn, 0};
+        const std::uint32_t to_call = (bd.currentBet > p.committed) ? (bd.currentBet - p.committed) : 0u;
+        if (to_call == 0)        return ActionStruct{ActionType::Check, 0};
+        if (to_call >= p.chips)  return ActionStruct{ActionType::AllIn, 0};
         return ActionStruct{ActionType::Call, 0};
     }
+
     case A_BetHalfPot:
     case A_BetPot:
     {
-        // Compute target as currentBet + size, respecting minRaise rules.
-        // If no live bet, it's a Bet; else a Raise.
-        std::uint32_t pot = std::max<std::uint32_t>(1, bd.pot);
-        std::uint32_t add = (idx == A_BetHalfPot) ? (pot / 2) : pot;
-        std::uint32_t target = (bd.currentBet == 0)
-                                   ? std::max<std::uint32_t>(bd.minRaise, add)
-                                   : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
+        // Target respects the minRaise rule; if no current bet it's a Bet, otherwise a Raise
+        const std::uint32_t pot = std::max<std::uint32_t>(1, bd.pot);
+        const std::uint32_t add = (idx == A_BetHalfPot) ? (pot / 2) : pot;
+        const std::uint32_t target = (bd.currentBet == 0)
+            ? std::max<std::uint32_t>(bd.minRaise, add)
+            : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
 
-        std::uint32_t need = clamp_add(target);
+        const std::uint32_t need = chips_to_reach(target);
         if (need == p.chips)
             return ActionStruct{ActionType::AllIn, 0};
         return (bd.currentBet == 0)
-                   ? ActionStruct{ActionType::Bet, target}
-                   : ActionStruct{ActionType::Raise, target};
+            ? ActionStruct{ActionType::Bet,   target}
+            : ActionStruct{ActionType::Raise, target};
     }
+
     case A_AllIn:
     default:
         return ActionStruct{ActionType::AllIn, 0};

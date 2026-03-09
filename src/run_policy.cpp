@@ -193,6 +193,9 @@ struct UIState
     GameState last_street = GameState::PreFlop;
     Phase     phase       = Phase::HumanTurn;
 
+    std::array<int, kNumActions> bot_action_counts = {};
+    int bot_total_actions = 0;
+
     void add_log(const std::wstring &s)
     {
         log.push_back(s);
@@ -251,6 +254,8 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
                 auto s    = featurize(g, kBot, blinds, pool);
                 unsigned aidx = policy_greedy(net, s, leg);
                 ui.add_log(L"Bot \u25b6 " + action_label(aidx, g.betData(), g.players()[kBot]));
+                ui.bot_action_counts[aidx]++;
+                ui.bot_total_actions++;
                 g.applyAction(rng, to_engine_action(aidx, g, kBot, blinds));
             }
             else
@@ -450,7 +455,29 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
         auto title = text(L" \u2660\u2665 Texas Hold'em: You (seat 0) vs Neural Bot (seat 1) \u2666\u2663 ")
                    | bold | hcenter;
 
-        return vbox({title, cards_section, log_section, action_bar}) | border;
+        // ── Bot action stats ──────────────────────────────────────────────
+        static const wchar_t *kSName[kNumActions] = {
+            L"Fold", L"Chk/Call", L"\u00bdPot", L"Pot", L"All-in"};
+        static const Color kSColor[kNumActions] = {
+            Color::Red, Color::Green, Color::Cyan, Color::Yellow, Color::Magenta};
+        std::vector<Element> stat_cells;
+        stat_cells.push_back(text(L" Bot actions: ") | bold);
+        for (int i = 0; i < kNumActions; ++i)
+        {
+            if (i > 0) stat_cells.push_back(separator());
+            int pct = (ui.bot_total_actions > 0)
+                ? static_cast<int>(std::round(100.0 * ui.bot_action_counts[i] / ui.bot_total_actions))
+                : 0;
+            std::wstring label = std::wstring(kSName[i]) + L" "
+                               + std::to_wstring(pct) + L"%";
+            stat_cells.push_back(text(L" " + label + L" ") | color(kSColor[i]));
+        }
+        stat_cells.push_back(separator());
+        stat_cells.push_back(
+            text(L" n=" + std::to_wstring(ui.bot_total_actions) + L" ") | dim);
+        auto stats_section = hbox(std::move(stat_cells)) | border;
+
+        return vbox({title, cards_section, log_section, action_bar, stats_section}) | border;
     };
 
     // ── FTXUI event loop ──────────────────────────────────────────────────
