@@ -62,7 +62,9 @@ TEST(DeckTest, ClassifyFullHouse)
                                                    Card(Suit::Hearts, Rank::King),
                                                    Card(Suit::Diamonds, Rank::King)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::FullHouse, Rank::Ace | Rank::King), "Expected Full House classification");
+    // FullHouse rank field is index-encoded: (trips_rank_idx << 4) | pair_rank_idx
+    // Ace=12, King=11 → (12<<4)|11 = 203
+    static_assert(result == ClassificationResult(Classification::FullHouse, static_cast<Rank>((12 << 4) | 11)), "Expected Full House classification");
 }
 TEST(DeckTest, ClassifyFourOfAKind)
 {
@@ -428,4 +430,109 @@ TEST(BugReproduction, PairEquality_DifferentPairs)
     // Now that we fix the implementation, r1 > r2 because Pair of Aces (Main=A) >
     // Pair of Kings (Main=K).
     static_assert(r1 > r2, "Pair of Aces should beat Pair of Kings despite having same kickers/ranks.");
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Bug-fix regression tests
+// ─────────────────────────────────────────────────────────────────
+
+// Bug 1: FullHouse comparison — trips rank must dominate
+TEST(BugFix, FullHouse_TripsRankDominates)
+{
+    static constexpr Deck aaakk = Deck::parseHand("Ah Ac Ad Kh Kd");
+    static constexpr Deck kkkaa = Deck::parseHand("Kh Kc Ks Ah Ad");
+    static constexpr ClassificationResult r1 = Hand::classify(aaakk);
+    static constexpr ClassificationResult r2 = Hand::classify(kkkaa);
+    static_assert(r1.getClassification() == Classification::FullHouse, "AAAKK must be FullHouse");
+    static_assert(r2.getClassification() == Classification::FullHouse, "KKKAA must be FullHouse");
+    static_assert(r1 > r2, "AAAKK must beat KKKAA");
+}
+
+// Bug 1: FullHouse comparison — same trips, pair rank breaks tie
+TEST(BugFix, FullHouse_PairRankBreaksTie)
+{
+    static constexpr Deck aaakk = Deck::parseHand("Ah Ac Ad Kh Kd");
+    static constexpr Deck aaaqq = Deck::parseHand("Ah Ac Ad Qh Qd");
+    static constexpr ClassificationResult r1 = Hand::classify(aaakk);
+    static constexpr ClassificationResult r2 = Hand::classify(aaaqq);
+    static_assert(r1 > r2, "AAAKK must beat AAAQQ (same trips, K > Q pair)");
+}
+
+// Bug 2: Two ranks each appearing 3 times must classify as FullHouse, not ThreeOfAKind
+TEST(BugFix, DoubleTrips_ClassifiesAsFullHouse)
+{
+    static constexpr Deck hand = Deck::parseHand("Ah Ad Ac Kh Kd Ks 2c");
+    static constexpr ClassificationResult result = Hand::classify(hand);
+    static_assert(result.getClassification() == Classification::FullHouse,
+        "3A + 3K + x must be FullHouse, not ThreeOfAKind");
+}
+
+// Bug 2: Double-trips FullHouse — higher trips still wins
+TEST(BugFix, DoubleTrips_HigherTripsWins)
+{
+    static constexpr Deck hand1 = Deck::parseHand("Ah Ad Ac Kh Kd Ks 2c"); // best FH: AAAKK
+    static constexpr Deck hand2 = Deck::parseHand("Kh Kd Kc Qh Qd Qs 2c"); // best FH: KKKQQ
+    static constexpr ClassificationResult r1 = Hand::classify(hand1);
+    static constexpr ClassificationResult r2 = Hand::classify(hand2);
+    static_assert(r1 > r2, "AAAKK must beat KKKQQ (from double-trips hands)");
+}
+
+// Bug 3: 7-card HighCard — irrelevant 6th/7th kickers must not affect comparison
+TEST(BugFix, HighCard_7Card_KickerNormalization)
+{
+    // Both share best 5: A K Q J 9. The 6th card differs (8 vs 7) — must be a tie.
+    static constexpr Deck hand1 = Deck::parseHand("8s 2h Ac Kd Qh Js 9d");
+    static constexpr Deck hand2 = Deck::parseHand("7d 2c Ac Kd Qh Js 9d");
+    static constexpr ClassificationResult r1 = Hand::classify(hand1);
+    static constexpr ClassificationResult r2 = Hand::classify(hand2);
+    static_assert(r1.getClassification() == Classification::HighCard, "Must be HighCard");
+    static_assert(r1 == r2, "Both share best 5 (AKQJ9); irrelevant 6th card must not break tie");
+}
+
+// Bug 3: 7-card ThreeOfAKind — irrelevant 4th/5th kickers must not affect comparison
+TEST(BugFix, ThreeOfAKind_7Card_KickerNormalization)
+{
+    // Trips Aces; both share best kickers 8 7. The 4th kicker differs (5 vs 4) — must be a tie.
+    static constexpr Deck hand1 = Deck::parseHand("5c 6d Ah Ad As 8c 7h");
+    static constexpr Deck hand2 = Deck::parseHand("4c 6d Ah Ad As 8c 7h");
+    static constexpr ClassificationResult r1 = Hand::classify(hand1);
+    static constexpr ClassificationResult r2 = Hand::classify(hand2);
+    static_assert(r1.getClassification() == Classification::ThreeOfAKind, "Must be ThreeOfAKind");
+    static_assert(r1 == r2, "Both have AAA87 as best 5; irrelevant 4th kicker must not break tie");
+}
+
+// Bug 3: 7-card FourOfAKind — irrelevant 3rd+ kickers must not affect comparison
+TEST(BugFix, FourOfAKind_7Card_KickerNormalization)
+{
+    // Quads Aces + K kicker. Extra cards J vs T are irrelevant — must be a tie.
+    static constexpr Deck hand1 = Deck::parseHand("Ah Ac Ad As Kh Jd 2c");
+    static constexpr Deck hand2 = Deck::parseHand("Ah Ac Ad As Kh Td 2c");
+    static constexpr ClassificationResult r1 = Hand::classify(hand1);
+    static constexpr ClassificationResult r2 = Hand::classify(hand2);
+    static_assert(r1.getClassification() == Classification::FourOfAKind, "Must be FourOfAKind");
+    static_assert(r1 == r2, "Both have AAAA K as best 5; irrelevant 3rd card must not break tie");
+}
+
+// Bug 4: Flush with 6 same-suit cards — irrelevant 6th suit card must not affect comparison
+TEST(BugFix, Flush_6Cards_KickerNormalization)
+{
+    // 6 hearts; both share top 5 (A K Q J 9). 6th heart differs (8H vs 7H) — must be a tie.
+    static constexpr Deck hand1 = Deck::parseHand("Ah Kh Qh Jh 9h 8h 2d");
+    static constexpr Deck hand2 = Deck::parseHand("Ah Kh Qh Jh 9h 7h 2d");
+    static constexpr ClassificationResult r1 = Hand::classify(hand1);
+    static constexpr ClassificationResult r2 = Hand::classify(hand2);
+    static_assert(r1.getClassification() == Classification::Flush, "Must be Flush");
+    static_assert(r1 == r2, "Both have AhKhQhJh9h as best flush; irrelevant 6th heart must not break tie");
+}
+
+// Bug 4: 6-card flush must still detect the wheel straight flush correctly
+TEST(BugFix, Flush_6Cards_WheelStraightFlushStillDetected)
+{
+    // 6 hearts including A-2-3-4-5; 9H is the extra card that must not interfere
+    static constexpr Deck hand = Deck::parseHand("5h 4h 3h 2h Ah 9h Kd");
+    static constexpr ClassificationResult result = Hand::classify(hand);
+    static_assert(result.getClassification() == Classification::StraightFlush,
+        "Wheel straight flush must be detected even with a 6th suited card present");
+    static_assert(result == ClassificationResult(Classification::StraightFlush, Rank::Five),
+        "Must be 5-high straight flush (wheel)");
 }

@@ -111,6 +111,25 @@ private:
         }
         return t;
     }();
+    static constexpr std::array<std::uint16_t, 8192> top5Table = []()
+    {
+        std::array<std::uint16_t, 8192> t{};
+        for (std::uint16_t v = 0; v < 8192; ++v)
+        {
+            std::uint16_t m = 0;
+            int count = 0;
+            for (int r = 12; r >= 0; --r)
+            {
+                if (!(v & (std::uint16_t(1u) << r)))
+                    continue;
+                m |= std::uint16_t(1u) << r;
+                if (++count == 5)
+                    break;
+            }
+            t[v] = m;
+        }
+        return t;
+    }();
     struct SuitMasks
     {
         std::uint16_t s0;
@@ -126,7 +145,8 @@ private:
     {
         std::uint8_t maxCount;
         std::uint8_t secondMaxCount;
-        std::uint16_t pairs;
+        std::uint16_t pairs;      // pair rank bits (Pair/TwoPair), or pair rank for FullHouse
+        std::uint16_t majorRank;  // trips rank bit (maxCount==3) or quads rank bit (maxCount==4)
     };
     static inline constexpr CountInfo topTwoCounts(SuitMasks suits, std::uint16_t anySuit) noexcept
     {
@@ -139,34 +159,40 @@ private:
             const std::uint16_t s2w = suits.s2 & without4;
             const std::uint16_t s3w = suits.s3 & without4;
             const std::uint16_t three = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three) [[unlikely]] return {4, 3, 0};
+            if (three) [[unlikely]] return {4, 3, 0, all4};
             const std::uint16_t two = (s0w & s1w) | (s2w & s3w) | ((s0w ^ s1w) & (s2w ^ s3w));
-            if (two) [[unlikely]] return {4, 2, 0};
-            if ((s0w | s1w | s2w | s3w) != 0) return {4, 1, 0};
-            return {4, 0, 0};
+            if (two) [[unlikely]] return {4, 2, 0, all4};
+            if ((s0w | s1w | s2w | s3w) != 0) return {4, 1, 0, all4};
+            return {4, 0, 0, all4};
         }
         const std::uint16_t three = (suits.s0 & suits.s1 & suits.s2) | (suits.s0 & suits.s1 & suits.s3) | (suits.s0 & suits.s2 & suits.s3) | (suits.s1 & suits.s2 & suits.s3);
         if (three) [[unlikely]]
         {
+            // Two different ranks each appearing 3 times (e.g. AAA KKK in a 7-card hand).
+            // The three bitmask has both rank bits set; pick the higher as trips, lower as pair.
+            if (std::popcount(static_cast<std::uint32_t>(three)) >= 2) [[unlikely]]
+            {
+                const std::uint16_t tripsRank = hiTable[three];
+                const std::uint16_t pairRank  = static_cast<std::uint16_t>(three & ~tripsRank);
+                return {3, 2, pairRank, tripsRank};
+            }
             const std::uint16_t without3 = ~three & 0x1FFFu;
             const std::uint16_t s0w = suits.s0 & without3;
             const std::uint16_t s1w = suits.s1 & without3;
             const std::uint16_t s2w = suits.s2 & without3;
             const std::uint16_t s3w = suits.s3 & without3;
-            const std::uint16_t three2 = (s0w & s1w & s2w) | (s0w & s1w & s3w) | (s0w & s2w & s3w) | (s1w & s2w & s3w);
-            if (three2) [[unlikely]] return {3, 3, 0};
             const std::uint16_t two = (s0w & s1w) | (s2w & s3w) | ((s0w ^ s1w) & (s2w ^ s3w));
-            if (two) [[unlikely]] return {3, 2, 0};
-            return {3, 1, 0};
+            if (two) [[unlikely]] return {3, 2, two, three};
+            return {3, 1, 0, three};
         }
         const std::uint16_t two = (suits.s0 & suits.s1) | (suits.s2 & suits.s3) | ((suits.s0 ^ suits.s1) & (suits.s2 ^ suits.s3));
         if (two)
         {
             const int pairCount = std::popcount(two);
-            if (pairCount >= 2) return {2, 2, two};
-            return {2, 1, two};
+            if (pairCount >= 2) return {2, 2, two, 0};
+            return {2, 1, two, 0};
         }
-        return {1, static_cast<std::uint8_t>(std::popcount(anySuit) > 1 ? 1 : 0), 0};
+        return {1, static_cast<std::uint8_t>(std::popcount(anySuit) > 1 ? 1 : 0), 0, 0};
     }
     static inline constexpr std::tuple<bool, Rank> getFlush(SuitMasks suits, std::uint16_t anySuit) noexcept
     {
@@ -225,18 +251,25 @@ public:
             }
             return {Classification::StraightFlush, highRank};
         }
-        auto [maxCount, secondMaxCount, pairs] = topTwoCounts(suits, anySuit);
+        auto [maxCount, secondMaxCount, pairs, majorRank] = topTwoCounts(suits, anySuit);
         if (maxCount == 4) [[unlikely]]
         {
-            return {Classification::FourOfAKind, rankValue};
+            // Best 5 = quads rank + single best kicker
+            const std::uint16_t kickerBit = hiTable[static_cast<std::uint16_t>(anySuit) & ~majorRank];
+            return {Classification::FourOfAKind, static_cast<Rank>(majorRank | kickerBit)};
         }
         if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
         {
-            return {Classification::FullHouse, rankValue};
+            // Encode as (trips_rank_idx << 4) | pair_rank_idx so that higher trips always wins,
+            // and with equal trips the higher pair wins. Both indices fit in 4 bits (0..12).
+            const int tripsIdx = std::countr_zero(static_cast<std::uint32_t>(majorRank));
+            const int pairIdx  = std::countr_zero(static_cast<std::uint32_t>(hiTable[pairs]));
+            return {Classification::FullHouse, static_cast<Rank>((tripsIdx << 4) | pairIdx)};
         }
         if (flush) [[unlikely]]
         {
-            return {Classification::Flush, rankValue};
+            // rankValue has all flush-suit rank bits; trim to best 5 for comparison
+            return {Classification::Flush, static_cast<Rank>(top5Table[static_cast<std::uint16_t>(rankValue)])};
         }
         if (straight) [[unlikely]]
         {
@@ -244,11 +277,14 @@ public:
         }
         if (maxCount == 3)
         {
-            return {Classification::ThreeOfAKind, rankValue};
+            // Best 5 = trips rank + top 2 kickers
+            const std::uint16_t top2Kickers = top2Table[static_cast<std::uint16_t>(anySuit) & ~majorRank];
+            return {Classification::ThreeOfAKind, static_cast<Rank>(majorRank | top2Kickers)};
         }
         if (maxCount != 2)
         {
-            return {Classification::HighCard, rankValue};
+            // Best 5 = top 5 ranks
+            return {Classification::HighCard, static_cast<Rank>(top5Table[static_cast<std::uint16_t>(anySuit)])};
         }
         if (secondMaxCount == 2)
         {
