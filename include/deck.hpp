@@ -2,7 +2,7 @@
 #define __POKER_DECK_HPP__
 #include <array>
 #include <random>
-#include <immintrin.h>
+#include "intrinsics.hpp"
 #include "card.hpp"
 #include "random.hpp"
 struct Deck
@@ -32,25 +32,6 @@ private:
     {
         int count = std::countr_zero(mask);
         return m_deck[count];
-    }
-
-    static inline constexpr std::uint64_t pdep(std::uint64_t x, std::uint64_t mask) noexcept
-    {
-        if (!std::is_constant_evaluated())
-        {
-            return _pdep_u64(x, mask);
-        }
-        std::uint64_t res = 0;
-        for (std::uint64_t m = mask; m; m &= m - 1)
-        {
-            std::uint64_t lowest = m & -static_cast<std::int64_t>(m);
-            if (x & 1)
-            {
-                res |= lowest;
-            }
-            x >>= 1;
-        }
-        return res;
     }
 
     constexpr explicit Deck(std::uint64_t mask) : m_cardsBitmask(mask) {}
