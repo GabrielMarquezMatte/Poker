@@ -33,7 +33,7 @@ private:
         std::uint16_t pairs;     // pair rank bits (Pair/TwoPair), or pair rank for FullHouse
         std::uint16_t majorRank; // trips rank bit (maxCount==3) or quads rank bit (maxCount==4)
     };
-    static inline constexpr CountInfo topTwoCounts(SuitMasks suits, std::uint16_t anySuit) noexcept
+    static inline constexpr CountInfo topTwoCounts(SuitMasks suits) noexcept
     {
         const std::uint16_t p01 = suits.s0 & suits.s1;
         const std::uint16_t p23 = suits.s2 & suits.s3;
@@ -60,8 +60,6 @@ private:
         const std::uint16_t three = (p01 & (suits.s2 | suits.s3)) | (p23 & (suits.s0 | suits.s1));
         if (three) [[unlikely]]
         {
-            // Two different ranks each appearing 3 times (e.g. AAA KKK in a 7-card hand).
-            // The three bitmask has both rank bits set; pick the higher as trips, lower as pair.
             if (three & (three - 1u)) [[unlikely]]
             {
                 const std::uint16_t tripsRank = highBit(three);
@@ -85,9 +83,8 @@ private:
                 return {2, 2, two, 0};
             return {2, 1, two, 0};
         }
-        return {1, static_cast<std::uint8_t>(std::popcount(anySuit) > 1 ? 1 : 0), 0, 0};
+        return {1, 0, 0, 0};
     }
-    // 0 = not a straight; nonzero = high-card rank as uint16_t (Rank values fit in 13 bits).
     static constexpr std::array<std::uint16_t, 1 << 13> straightTable = []()
     {
         std::array<std::uint16_t, 1 << 13> tbl{};
@@ -114,25 +111,12 @@ private:
     {
         std::array<uint16_t, 1 << 13> table{};
         for (std::uint32_t m = 0; m < (1 << 13); ++m)
-        {
             table[m] = (std::popcount(m) >= 5 ? uint16_t(m) : 0);
-        }
         return table;
     }();
-    static inline constexpr std::tuple<bool, Rank> getFlush(SuitMasks suits, std::uint16_t anySuit) noexcept
+    static inline constexpr std::uint16_t getFlush(SuitMasks suits) noexcept
     {
-        const std::uint16_t f0 = flushTable[suits.s0];
-        const std::uint16_t f1 = flushTable[suits.s1];
-        const std::uint16_t f2 = flushTable[suits.s2];
-        const std::uint16_t f3 = flushTable[suits.s3];
-        const std::uint16_t flushMask = f0 | f1 | f2 | f3;
-        const bool isFlush = flushMask != 0;
-        const std::uint16_t rankMask = isFlush ? flushMask : anySuit;
-        return {isFlush, static_cast<Rank>(rankMask)};
-    }
-    static inline constexpr std::uint16_t getStraight(const Rank rankMask) noexcept
-    {
-        return straightTable[static_cast<std::uint16_t>(rankMask)];
+        return flushTable[suits.s0] | flushTable[suits.s1] | flushTable[suits.s2] | flushTable[suits.s3];
     }
     static inline constexpr std::uint16_t makeTwoPairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
     {
@@ -143,8 +127,6 @@ private:
 
     static inline constexpr std::uint16_t makePairMask(std::uint16_t anySuit, std::uint16_t pairs) noexcept
     {
-        // pairs is a single bit; keep top 3 kickers from the remaining ranks.
-        // Max excess is 2 (7-card hand), so 2 conditional clears cover all cases.
         std::uint16_t k = anySuit ^ pairs;
         const int excess = std::popcount(k) - 3;
         if (excess > 0)
@@ -171,35 +153,41 @@ public:
         std::uint64_t deckMask = cards.getMask();
         SuitMasks suits = getSuitRanks(deckMask);
         const std::uint16_t anySuit = suits.anySuit();
-        auto [flush, rankValue] = getFlush(suits, anySuit);
-        const std::uint16_t straightVal = getStraight(rankValue);
-        if (straightVal && flush) [[unlikely]]
+        const std::uint16_t flushMask = getFlush(suits);
+        const std::uint16_t straightVal = straightTable[anySuit];
+        auto [maxCount, secondMaxCount, pairs, majorRank] = topTwoCounts(suits);
+        if (flushMask) [[unlikely]]
         {
-            if (straightVal == static_cast<std::uint16_t>(Rank::Ace))
+            const std::uint16_t straightValFlush = straightTable[flushMask];
+            if (straightValFlush) [[unlikely]]
             {
-                return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
+                if (straightValFlush == static_cast<std::uint16_t>(Rank::Ace))
+                    return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
+                return {Classification::StraightFlush, static_cast<Rank>(straightValFlush)};
             }
-            return {Classification::StraightFlush, static_cast<Rank>(straightVal)};
+            if (maxCount == 4) [[unlikely]]
+            {
+                const std::uint16_t kickerBit = highBit(static_cast<std::uint16_t>(anySuit) & ~majorRank);
+                return {Classification::FourOfAKind, static_cast<Rank>(majorRank | kickerBit)};
+            }
+            if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
+            {
+                const int tripsIdx = std::countr_zero(static_cast<std::uint32_t>(majorRank));
+                const int pairIdx = std::bit_width(static_cast<std::uint32_t>(pairs)) - 1;
+                return {Classification::FullHouse, static_cast<Rank>((tripsIdx << 4) | pairIdx)};
+            }
+            return {Classification::Flush, static_cast<Rank>(keepTopBits(flushMask, 5))};
         }
-        auto [maxCount, secondMaxCount, pairs, majorRank] = topTwoCounts(suits, anySuit);
         if (maxCount == 4) [[unlikely]]
         {
-            // Best 5 = quads rank + single best kicker
             const std::uint16_t kickerBit = highBit(static_cast<std::uint16_t>(anySuit) & ~majorRank);
             return {Classification::FourOfAKind, static_cast<Rank>(majorRank | kickerBit)};
         }
         if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
         {
-            // Encode as (trips_rank_idx << 4) | pair_rank_idx so that higher trips always wins,
-            // and with equal trips the higher pair wins. Both indices fit in 4 bits (0..12).
             const int tripsIdx = std::countr_zero(static_cast<std::uint32_t>(majorRank));
             const int pairIdx = std::bit_width(static_cast<std::uint32_t>(pairs)) - 1;
             return {Classification::FullHouse, static_cast<Rank>((tripsIdx << 4) | pairIdx)};
-        }
-        if (flush) [[unlikely]]
-        {
-            // rankValue has all flush-suit rank bits; trim to best 5 for comparison
-            return {Classification::Flush, static_cast<Rank>(keepTopBits(static_cast<std::uint16_t>(rankValue), 5))};
         }
         if (straightVal) [[unlikely]]
         {
@@ -207,7 +195,6 @@ public:
         }
         if (maxCount == 3)
         {
-            // Best 5 = trips rank + top 2 kickers. Max 2 excess bits (7-card hand has 4 kickers).
             std::uint16_t k = static_cast<std::uint16_t>(anySuit) & ~majorRank;
             const int excess = std::popcount(k) - 2;
             if (excess > 0)
@@ -218,16 +205,19 @@ public:
         }
         if (maxCount != 2)
         {
-            // Best 5 = top 5 ranks
-            return {Classification::HighCard, static_cast<Rank>(keepTopBits(static_cast<std::uint16_t>(anySuit), 5))};
+            std::uint16_t hc = static_cast<std::uint16_t>(anySuit);
+            const int excess = std::popcount(hc) - 5;
+            if (excess > 0)
+                hc &= hc - 1u;
+            if (excess > 1)
+                hc &= hc - 1u;
+            return {Classification::HighCard, static_cast<Rank>(hc)};
         }
         if (secondMaxCount == 2)
         {
-            std::uint16_t twoPairMask = makeTwoPairMask(anySuit, pairs);
-            return {Classification::TwoPair, static_cast<Rank>(twoPairMask)};
+            return {Classification::TwoPair, static_cast<Rank>(makeTwoPairMask(anySuit, pairs))};
         }
-        std::uint16_t pairMask = makePairMask(anySuit, pairs);
-        return {Classification::Pair, static_cast<Rank>(pairMask)};
+        return {Classification::Pair, static_cast<Rank>(makePairMask(anySuit, pairs))};
     }
 };
 #endif // __POKER_HAND_HPP__
