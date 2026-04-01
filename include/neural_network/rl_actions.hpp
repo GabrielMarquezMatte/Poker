@@ -1,6 +1,7 @@
 #ifndef __POKER_RL_ACTIONS_HPP__
 #define __POKER_RL_ACTIONS_HPP__
-#include <vector>
+#include <array>
+#include <span>
 #include <cstdint>
 #include <algorithm>
 #include "../game/game.hpp"
@@ -24,10 +25,24 @@ static inline std::uint32_t sized_bet_target(const BetData &bd, std::uint32_t ad
         : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
 }
 
+// Fixed-size result of legal_actions() — avoids heap allocation in the hot path.
+struct LegalActions {
+    std::array<unsigned, A_COUNT> data;
+    unsigned count = 0;
+
+    void push_back(unsigned v) noexcept { data[count++] = v; }
+    bool empty() const noexcept { return count == 0; }
+    unsigned size() const noexcept { return count; }
+    unsigned operator[](std::size_t i) const noexcept { return data[i]; }
+    const unsigned* begin() const noexcept { return data.data(); }
+    const unsigned* end()   const noexcept { return data.data() + count; }
+    operator std::span<const unsigned>() const noexcept { return {data.data(), count}; }
+};
+
 // Returns the set of legal abstract actions for `heroIdx` in the current game state.
-inline std::vector<unsigned> legal_actions(const Game &g, std::size_t heroIdx, const Blinds & /*blinds*/)
+inline LegalActions legal_actions(const Game &g, std::size_t heroIdx, const Blinds & /*blinds*/)
 {
-    std::vector<unsigned> actions;
+    LegalActions actions;
     const auto &p  = g.players()[heroIdx];
     const auto &bd = g.betData();
 

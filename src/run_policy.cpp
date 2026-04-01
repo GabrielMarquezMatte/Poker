@@ -105,23 +105,14 @@ static ftxui::Element hidden_hand_widget(std::size_t n)
 }
 
 // Bet helpers
-static uint32_t pot_target(const BetData &bd, bool half) noexcept
-{
-    uint32_t p = std::max<uint32_t>(1, bd.pot);
-    uint32_t add = half ? p / 2 : p;
-    return (bd.currentBet == 0)
-        ? std::max<uint32_t>(bd.minRaise, add)
-        : std::max<uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
-}
-
 static uint32_t action_cost(unsigned a, const BetData &bd, const Player &p) noexcept
 {
     switch (a)
     {
     case A_Fold:       return 0;
     case A_CheckCall:  return std::min((bd.currentBet > p.committed) ? bd.currentBet - p.committed : 0u, p.chips);
-    case A_BetHalfPot: { uint32_t t = pot_target(bd, true);  return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
-    case A_BetPot:     { uint32_t t = pot_target(bd, false); return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
+    case A_BetHalfPot: { uint32_t pot = std::max<uint32_t>(1, bd.pot); uint32_t t = sized_bet_target(bd, pot / 2); return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
+    case A_BetPot:     { uint32_t pot = std::max<uint32_t>(1, bd.pot); uint32_t t = sized_bet_target(bd, pot);     return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
     default:           return p.chips;
     }
 }

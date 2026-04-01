@@ -41,7 +41,7 @@ using value_net = dlib::loss_mean_squared<dlib::fc<1, value_body>>;
 template <typename Net>
 inline const dlib::tensor& forward_single(Net &net, const dlib::matrix<float> &s)
 {
-    std::vector<dlib::matrix<float>> input = {s};
+    std::array<dlib::matrix<float>, 1> input = {s};
     dlib::resizable_tensor buf;
     net.to_tensor(input.data(), input.data() + 1, buf);
     net.subnet().forward(buf);
@@ -100,6 +100,12 @@ inline float compute_entropy(const std::span<const float> probs)
 
 // ────────────────────────────── Sampling helpers ──────────────────────────────
 
+static inline constexpr void apply_temperature(std::span<float> logits, float temperature) noexcept
+{
+    if (temperature != 1.0f)
+        for (auto &l : logits) l /= temperature;
+}
+
 // Samples an action from the masked policy distribution.
 template <class TRng>
 inline unsigned policy_sample(policy_net &net,
@@ -111,8 +117,7 @@ inline unsigned policy_sample(policy_net &net,
     if (legal.empty()) return 0u;
 
     auto logits = get_action_logits(net, s);
-    if (temperature != 1.0f)
-        for (auto &l : logits) l /= temperature;
+    apply_temperature(logits, temperature);
 
     const auto probs = softmax_legal(logits, legal);
 
@@ -141,8 +146,7 @@ inline std::pair<unsigned, std::vector<float>> policy_sample_with_probs(
         return {0u, std::vector<float>(kNumActions, 0.f)};
 
     auto logits = get_action_logits(net, s);
-    if (temperature != 1.0f)
-        for (auto &l : logits) l /= temperature;
+    apply_temperature(logits, temperature);
 
     auto probs = softmax_legal(logits, legal);
 

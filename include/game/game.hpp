@@ -53,32 +53,26 @@ private:
                              { return p.eligible() && p.id != idx; });
     }
 
-    inline constexpr std::size_t nextEligibleFrom(std::size_t i) const noexcept
+    template <typename Pred>
+    inline constexpr std::size_t nextPlayerFrom(std::size_t i, Pred pred) const noexcept
     {
         const std::size_t n = numberOfPlayers();
         for (std::size_t k = 1; k <= n; ++k)
         {
             std::size_t idx = (i + k) % n;
-            if (m_players[idx].eligible())
-            {
-                return idx;
-            }
+            if (pred(m_players[idx])) return idx;
         }
         return n;
     }
 
+    inline constexpr std::size_t nextEligibleFrom(std::size_t i) const noexcept
+    {
+        return nextPlayerFrom(i, [](const Player &p) noexcept { return p.eligible(); });
+    }
+
     inline constexpr std::size_t nextAliveFrom(std::size_t i) const noexcept
     {
-        const std::size_t n = numberOfPlayers();
-        for (std::size_t k = 1; k <= n; ++k)
-        {
-            std::size_t idx = (i + k) % n;
-            if (m_players[idx].alive())
-            {
-                return idx;
-            }
-        }
-        return n;
+        return nextPlayerFrom(i, [](const Player &p) noexcept { return p.alive(); });
     }
 
     inline constexpr void commit(Player &player, std::uint32_t amount) noexcept
