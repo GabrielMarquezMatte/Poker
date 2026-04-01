@@ -35,23 +35,10 @@
 #include "../include/game/blinds.hpp"
 #include "../include/hand.hpp"
 
-// ─────────────────────────────── RNG ──────────────────────────────────────────
-struct GameRng
-{
-    using result_type = uint64_t;
-    omp::XoroShiro128Plus eng;
-    explicit GameRng(uint64_t seed = 0)
-        : eng(seed ? seed : static_cast<uint64_t>(std::random_device{}())) {}
-    static constexpr result_type min() { return 0ULL; }
-    static constexpr result_type max() { return ~0ULL; }
-    result_type operator()() { return eng(); }
-};
-
-// ────────────────────── Seat constants ────────────────────────────────────────
 static constexpr std::size_t kHuman = 0;
 static constexpr std::size_t kBot   = 1;
 
-// ────────────────────── Card / deck helpers ────────────────────────────────────
+// Card / deck helpers
 static std::wstring suit_symbol(Suit s) noexcept
 {
     switch (s)
@@ -79,7 +66,7 @@ static std::wstring fmt_card(const Card &c)
     return r + suit_symbol(c.getSuit());
 }
 
-// ────────────────── FTXUI card widgets ────────────────────────────────────────
+// FTXUI card widgets
 static ftxui::Element card_widget(const Card &c)
 {
     auto t = ftxui::text(fmt_card(c));
@@ -117,21 +104,14 @@ static ftxui::Element hidden_hand_widget(std::size_t n)
     return ftxui::hbox(std::move(elems));
 }
 
-// ──────────────────────── Bet helpers ─────────────────────────────────────────
-static uint32_t half_pot_target(const BetData &bd) noexcept
+// Bet helpers
+static uint32_t pot_target(const BetData &bd, bool half) noexcept
 {
     uint32_t p = std::max<uint32_t>(1, bd.pot);
+    uint32_t add = half ? p / 2 : p;
     return (bd.currentBet == 0)
-        ? std::max<uint32_t>(bd.minRaise, p / 2)
-        : std::max<uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + p / 2);
-}
-
-static uint32_t full_pot_target(const BetData &bd) noexcept
-{
-    uint32_t p = std::max<uint32_t>(1, bd.pot);
-    return (bd.currentBet == 0)
-        ? std::max<uint32_t>(bd.minRaise, p)
-        : std::max<uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + p);
+        ? std::max<uint32_t>(bd.minRaise, add)
+        : std::max<uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
 }
 
 static uint32_t action_cost(unsigned a, const BetData &bd, const Player &p) noexcept
@@ -140,8 +120,8 @@ static uint32_t action_cost(unsigned a, const BetData &bd, const Player &p) noex
     {
     case A_Fold:       return 0;
     case A_CheckCall:  return std::min((bd.currentBet > p.committed) ? bd.currentBet - p.committed : 0u, p.chips);
-    case A_BetHalfPot: { uint32_t t = half_pot_target(bd); return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
-    case A_BetPot:     { uint32_t t = full_pot_target(bd);  return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
+    case A_BetHalfPot: { uint32_t t = pot_target(bd, true);  return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
+    case A_BetPot:     { uint32_t t = pot_target(bd, false); return (t > p.committed) ? std::min(t - p.committed, p.chips) : 0; }
     default:           return p.chips;
     }
 }
@@ -171,7 +151,7 @@ static const wchar_t *street_name(GameState s) noexcept
     }
 }
 
-// ──────────────────────── UI State ────────────────────────────────────────────
+// UI State
 enum class Phase { HumanTurn, HandOver, GameOver };
 
 struct UIState
@@ -203,7 +183,7 @@ struct UIState
     }
 };
 
-// ──────────────────── Interactive mode ────────────────────────────────────────
+// Interactive mode
 static void play_interactive(policy_net &net, const Blinds &blinds, int starting_chips)
 {
     using namespace ftxui;
@@ -212,15 +192,13 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
     g.addPlayer(static_cast<uint32_t>(starting_chips));
     g.addPlayer(static_cast<uint32_t>(starting_chips));
 
-    GameRng rng;
+    omp::XoroShiro128Plus rng(static_cast<uint64_t>(std::random_device{}()));
     BS::thread_pool<BS::tp::none> pool(std::max(1u, std::thread::hardware_concurrency()));
 
     UIState ui;
     uint32_t human_before = 0;
     uint32_t bot_before   = 0;
 
-    // ── advance: run bot turns and fast-forwards until it's human's turn
-    //    or the hand ends.
     auto advance = [&]()
     {
         while (g.state() != GameState::Finished)
@@ -270,9 +248,16 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
                     ui.legal.push_back(a);
                     ui.alabel.push_back(action_label(a, bd, hp));
                 }
-                // Compute equity (once per decision point, not every render frame)
+                // Compute equity and hand class once per decision point, not every render frame
                 ui.equity = static_cast<float>(probabilityOfWinning(
                     hp.hole, g.board(), 5000, g.players().size(), pool));
+                if (g.board().size() >= 3)
+                {
+                    auto r = Hand::classify(Deck::createDeck({hp.hole, g.board()}));
+                    std::wostringstream wos;
+                    wos << r.getClassification();
+                    ui.your_class = wos.str();
+                }
                 ui.phase = Phase::HumanTurn;
                 return;
             }
@@ -313,7 +298,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
         ui.phase = (fps[kHuman].chips < blinds.bigBlind) ? Phase::GameOver : Phase::HandOver;
     };
 
-    // ── start_hand: setup then call advance
     auto start_hand = [&]()
     {
         if (g.players()[kBot].chips < blinds.bigBlind)
@@ -334,7 +318,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
         advance();
     };
 
-    // ── render: build the FTXUI DOM from current game + ui state
     auto render_fn = [&]() -> Element
     {
         const auto &hp = g.players()[kHuman];
@@ -346,16 +329,8 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
 
         bool reveal_bot = (ui.phase == Phase::HandOver || ui.phase == Phase::GameOver);
 
-        // ── Left panel: hands ─────────────────────────────────────────────
         std::vector<Element> your_items = {text(L"YOUR HAND") | bold, hand_widget(hp.hole)};
-        if (g.board().size() >= 3 && hp.alive())
-        {
-            auto r = Hand::classify(Deck::createDeck({hp.hole, g.board()}));
-            std::wostringstream wos;
-            wos << r.getClassification();
-            your_items.push_back(text(wos.str()) | bold | color(Color::Yellow));
-        }
-        else if (!ui.your_class.empty())
+        if (!ui.your_class.empty())
             your_items.push_back(text(ui.your_class) | bold | color(Color::Yellow));
         if (ui.equity >= 0.f)
         {
@@ -382,7 +357,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
             bot_panel,
         }) | border | flex;
 
-        // ── Right panel: board + info ─────────────────────────────────────
         GameState disp_state = (g.state() == GameState::Finished)
                              ? ui.last_street : g.state();
         auto board_label = text(std::wstring(L"BOARD  [") + street_name(disp_state) + L"]") | bold;
@@ -417,7 +391,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
 
         auto cards_section = hbox({left_col, right_col});
 
-        // ── Action log ────────────────────────────────────────────────────
         std::vector<Element> log_elems;
         for (const auto &line : ui.log)
             log_elems.push_back(text(L"  " + line));
@@ -425,7 +398,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
             log_elems.push_back(text(L"  ...") | dim);
         auto log_section = vbox(std::move(log_elems)) | border;
 
-        // ── Action bar ────────────────────────────────────────────────────
         Element action_bar;
         if (ui.phase == Phase::HumanTurn)
         {
@@ -451,15 +423,17 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
                        | border | hcenter | bold | color(Color::Red);
         }
 
-        // ── Title ─────────────────────────────────────────────────────────
         auto title = text(L" \u2660\u2665 Texas Hold'em: You (seat 0) vs Neural Bot (seat 1) \u2666\u2663 ")
                    | bold | hcenter;
 
-        // ── Bot action stats ──────────────────────────────────────────────
-        static const wchar_t *kSName[kNumActions] = {
-            L"Fold", L"Chk/Call", L"\u00bdPot", L"Pot", L"All-in"};
-        static const Color kSColor[kNumActions] = {
-            Color::Red, Color::Green, Color::Cyan, Color::Yellow, Color::Magenta};
+        // Bot action stats
+        static const struct { const wchar_t *name; Color color; } kAction[kNumActions] = {
+            {L"Fold",      Color::Red    },
+            {L"Chk/Call",  Color::Green  },
+            {L"\u00bdPot", Color::Cyan   },
+            {L"Pot",       Color::Yellow },
+            {L"All-in",    Color::Magenta},
+        };
         std::vector<Element> stat_cells;
         stat_cells.push_back(text(L" Bot actions: ") | bold);
         for (int i = 0; i < kNumActions; ++i)
@@ -468,9 +442,8 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
             int pct = (ui.bot_total_actions > 0)
                 ? static_cast<int>(std::round(100.0 * ui.bot_action_counts[i] / ui.bot_total_actions))
                 : 0;
-            std::wstring label = std::wstring(kSName[i]) + L" "
-                               + std::to_wstring(pct) + L"%";
-            stat_cells.push_back(text(L" " + label + L" ") | color(kSColor[i]));
+            std::wstring label = std::wstring(kAction[i].name) + L" " + std::to_wstring(pct) + L"%";
+            stat_cells.push_back(text(L" " + label + L" ") | color(kAction[i].color));
         }
         stat_cells.push_back(separator());
         stat_cells.push_back(
@@ -480,7 +453,6 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
         return vbox({title, cards_section, log_section, action_bar, stats_section}) | border;
     };
 
-    // ── FTXUI event loop ──────────────────────────────────────────────────
     auto screen = ScreenInteractive::Fullscreen();
 
     auto component = Renderer(render_fn)
@@ -528,7 +500,7 @@ static void play_interactive(policy_net &net, const Blinds &blinds, int starting
     screen.Loop(component);
 }
 
-// ──────────────────── Benchmark mode (Neural vs Random) ───────────────────────
+// Benchmark mode (Neural vs Random)
 static void run_benchmark(policy_net &net, const Blinds &blinds,
                           int n_players, int chips, int hands)
 {
@@ -536,7 +508,7 @@ static void run_benchmark(policy_net &net, const Blinds &blinds,
     for (int i = 0; i < n_players; ++i)
         g.addPlayer(static_cast<uint32_t>(chips));
 
-    GameRng rng(42);
+    omp::XoroShiro128Plus rng(42);
     BS::thread_pool<BS::tp::none> pool(std::max(1u, std::thread::hardware_concurrency()));
 
     const std::size_t bot_id = g.players()[0].id;
@@ -642,7 +614,7 @@ static void run_benchmark(policy_net &net, const Blinds &blinds,
     }
 }
 
-// ─────────────────────────────── main ─────────────────────────────────────────
+// main
 int main(int argc, char **argv)
 {
     Blinds blinds{50, 100};

@@ -16,6 +16,14 @@ enum ActIdx : unsigned
     A_COUNT      = 5
 };
 
+// Compute the total-bet target for a sized bet/raise given how much to add above the current pot.
+static inline std::uint32_t sized_bet_target(const BetData &bd, std::uint32_t add) noexcept
+{
+    return (bd.currentBet == 0)
+        ? std::max<std::uint32_t>(bd.minRaise, add)
+        : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
+}
+
 // Returns the set of legal abstract actions for `heroIdx` in the current game state.
 inline std::vector<unsigned> legal_actions(const Game &g, std::size_t heroIdx, const Blinds & /*blinds*/)
 {
@@ -51,12 +59,8 @@ inline std::vector<unsigned> legal_actions(const Game &g, std::size_t heroIdx, c
     };
 
     // Sized bets: only offered when they land at a distinct non-all-in chip level
-    const std::uint32_t half_target = (bd.currentBet == 0)
-        ? std::max<std::uint32_t>(bd.minRaise, pot / 2)
-        : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot / 2);
-    const std::uint32_t pot_target = (bd.currentBet == 0)
-        ? std::max<std::uint32_t>(bd.minRaise, pot)
-        : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + pot);
+    const std::uint32_t half_target = sized_bet_target(bd, pot / 2);
+    const std::uint32_t pot_target  = sized_bet_target(bd, pot);
 
     if (is_non_shove_target(half_target)) add_if_new(A_BetHalfPot);
     if (is_non_shove_target(pot_target))  add_if_new(A_BetPot);
@@ -109,10 +113,8 @@ inline ActionStruct to_engine_action(unsigned idx, const Game &g, std::size_t he
     {
         // Target respects the minRaise rule; if no current bet it's a Bet, otherwise a Raise
         const std::uint32_t pot = std::max<std::uint32_t>(1, bd.pot);
-        const std::uint32_t add = (idx == A_BetHalfPot) ? (pot / 2) : pot;
-        const std::uint32_t target = (bd.currentBet == 0)
-            ? std::max<std::uint32_t>(bd.minRaise, add)
-            : std::max<std::uint32_t>(bd.currentBet + bd.minRaise, bd.currentBet + add);
+        const std::uint32_t add    = (idx == A_BetHalfPot) ? (pot / 2) : pot;
+        const std::uint32_t target = sized_bet_target(bd, add);
 
         const std::uint32_t need = chips_to_reach(target);
         if (need == p.chips)

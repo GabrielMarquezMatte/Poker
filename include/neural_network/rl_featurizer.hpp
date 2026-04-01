@@ -3,6 +3,8 @@
 #include <dlib/matrix.h>
 #include <span>
 #include <cmath>
+#include <cassert>
+#include <limits>
 #include <BS_thread_pool.hpp>
 #include "../game/game.hpp"
 #include "../game.hpp"
@@ -37,8 +39,7 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     // Player counts
     int alive = 0, elig = 0;
     float total_opp_chips = 0.f;
-    float max_opp_chips = 0.f;
-    float min_opp_chips = 1e9f;
+    float min_opp_chips = std::numeric_limits<float>::max();
     for (auto const &p : ps)
     {
         if (p.alive())
@@ -48,11 +49,10 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
         if (p.id != heroIdx && p.alive())
         {
             total_opp_chips += static_cast<float>(p.chips);
-            max_opp_chips = std::max(max_opp_chips, static_cast<float>(p.chips));
             min_opp_chips = std::min(min_opp_chips, static_cast<float>(p.chips));
         }
     }
-    if (min_opp_chips > 1e8f) min_opp_chips = 0.f;
+    if (min_opp_chips == std::numeric_limits<float>::max()) min_opp_chips = 0.f;
     float avg_opp_stack = (alive > 1) ? total_opp_chips / static_cast<float>(alive - 1) : 0.f;
 
     // Betting situation
@@ -93,11 +93,9 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x = 0;
     int k = 0;
 
-    // Street one-hot (4 features)
-    x(k++) = (street_idx == 0) ? 1.f : 0.f;  // PreFlop
-    x(k++) = (street_idx == 1) ? 1.f : 0.f;  // Flop
-    x(k++) = (street_idx == 2) ? 1.f : 0.f;  // Turn
-    x(k++) = (street_idx == 3) ? 1.f : 0.f;  // River
+    // Street one-hot (k=0..3): x is already zeroed; set only the active street.
+    x(street_idx) = 1.f;
+    k += 4;
 
     // Betting situation (6 features)
     x(k++) = (to_call == 0) ? 1.f : 0.f;                                // can_check
@@ -107,7 +105,6 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x(k++) = facing_bet;                                                 // facing a bet
     x(k++) = norm(bet_to_pot, kMaxBetToPot);                            // bet/pot ratio
 
-    // Stack info (6 features)
     x(k++) = norm_bb(static_cast<float>(hero.chips), kMaxStackBB);      // hero stack
     x(k++) = norm(spr, kMaxSPR);                                        // SPR
     x(k++) = committed_ratio;                                            // street commitment
@@ -115,7 +112,6 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x(k++) = norm_bb(effective_stack, kMaxStackBB);                     // effective stack
     x(k++) = can_raise;                                                  // can raise
 
-    // Game state (3 features — street_progress removed; one-hot already encodes street)
     x(k++) = static_cast<float>(alive) / static_cast<float>(ps.size()); // fraction alive
     x(k++) = static_cast<float>(elig) / static_cast<float>(ps.size());  // fraction eligible
     x(k++) = position;                                                    // position indicator
@@ -125,7 +121,6 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     // Discrete bins are just noisy discretizations of a value the network already has.
     x(k++) = equity; // raw Monte Carlo win probability
 
-    // Decision features (5 features — scaled EV margin removed as it duplicates EV margin × 5)
     x(k++) = (equity > pot_odds) ? 1.f : 0.f;               // +EV to call
     x(k++) = std::max(0.f, equity - pot_odds);               // EV margin
     x(k++) = (equity > 0.5f && spr < 4.f) ? 1.f : 0.f;     // short-stacked value spot
@@ -158,10 +153,7 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     x(k++) = hero_stack_invested; // remaining stack / total invested (hand commitment)
     x(k++) = facing_allin;       // 1 if a call would put hero all-in
 
-    // Ensure we have exactly kInputDims (32)
-    while (k < kInputDims)
-        x(k++) = 0.f;
-
+    assert(k == kInputDims);
     return x;
 }
 

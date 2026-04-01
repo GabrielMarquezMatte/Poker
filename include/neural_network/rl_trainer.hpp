@@ -94,7 +94,7 @@ float play_one_hand_collect(Game &g, TRng &rng, policy_net &net, value_net &vnet
     std::vector<std::vector<TrajStep>> per_actor(n);
 
     static thread_local omp::XoroShiro128Plus exrng{std::random_device{}()};
-    std::uniform_real_distribution<double> U(0.0, 1.0);
+    static thread_local std::uniform_real_distribution<double> U(0.0, 1.0);
 
     while (g.state() != GameState::Finished)
     {
@@ -226,9 +226,7 @@ inline void build_training_batch(
     }
 
     // Phase 3: Normalize adjusted advantages (zero mean, unit variance).
-    float mu = 0.f;
-    for (float v : adj_adv) mu += v;
-    mu /= static_cast<float>(adj_adv.size());
+    float mu = std::accumulate(adj_adv.begin(), adj_adv.end(), 0.f) / static_cast<float>(adj_adv.size());
 
     float var = 0.f;
     for (float v : adj_adv) { float d = v - mu; var += d * d; }
@@ -330,20 +328,9 @@ EpochStats train_epoch(policy_net &net, value_net &vnet,
     // Collect trajectories
     for (int h = 0; h < hands_per_epoch; ++h)
     {
-        // Reset chips if needed
-        bool needs_reset = false;
-        for (const auto &p : g.players())
-        {
-            if (p.chips < blinds.bigBlind * 3)
-            {
-                needs_reset = true;
-                break;
-            }
-        }
-        if (needs_reset)
-        {
+        if (std::any_of(g.players().begin(), g.players().end(),
+                        [&](const auto &p) { return p.chips < blinds.bigBlind * 3; }))
             g.resetPlayerChips(starting_chips);
-        }
 
         float reward = play_one_hand_collect(g, rng, net, vnet, blinds, traj, epsilon, pool,
                                              config, temperature, 0);
