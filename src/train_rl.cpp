@@ -8,16 +8,6 @@
 #include "../include/neural_network/rl_trainer.hpp"
 
 
-static Game make_game(std::size_t nPlayers, std::uint32_t chips, const Blinds &b)
-{
-    Game g(b);
-    for (std::size_t i = 0; i < nPlayers; ++i)
-    {
-        g.addPlayer(chips);
-    }
-    return g;
-}
-
 int main()
 {
     std::cout << "=== Poker RL Training (Actor-Critic with Self-Play) ===" << std::endl;
@@ -74,7 +64,8 @@ int main()
         constexpr std::size_t n_players = 3;
         constexpr std::uint32_t starting_chips = 10000;
         std::cout << "Creating game with " << n_players << " players, " << starting_chips << " chips each..." << std::endl;
-        auto g = make_game(n_players, starting_chips, blinds);
+        Game g(blinds);
+        for (std::size_t i = 0; i < n_players; ++i) g.addPlayer(starting_chips);
         std::cout << "Game created." << std::endl;
 
         // Create thread pool for parallel equity calculation

@@ -287,21 +287,19 @@ inline void build_training_batch(
             y_policy.push_back(t.a);
             advantages_out.push_back(a / static_cast<float>(r + 1));
         }
-    }
 
-    // Phase 5: Reinforce rare, successful non-all-in actions to maintain diversity.
-    for (size_t i = 0; i < traj.size(); ++i)
-    {
-        const auto &t = traj[i];
-        if (t.a == A_AllIn)
-            continue;
-
-        float action_freq = static_cast<float>(action_counts[t.a]) / static_cast<float>(total_actions);
-        if (action_freq < kRareActionFreq && t.R > 0.f && adj_adv[i] > kAdvRepeat1)
+        // Reinforce rare, successful non-all-in actions to maintain diversity.
+        // (Merged from former Phase 5 — safe here because a > kAdvRepeat1 implies a > 0,
+        //  so Phase 4's negative-advantage filter cannot have triggered for this step.)
+        if (t.a != A_AllIn)
         {
-            X_policy.push_back(t.s);
-            y_policy.push_back(t.a);
-            advantages_out.push_back(std::max(kAdvRepeat1, adj_adv[i]));
+            const float action_freq = static_cast<float>(action_counts[t.a]) / static_cast<float>(total_actions);
+            if (action_freq < kRareActionFreq && t.R > 0.f && a > kAdvRepeat1)
+            {
+                X_policy.push_back(t.s);
+                y_policy.push_back(t.a);
+                advantages_out.push_back(std::max(kAdvRepeat1, a));
+            }
         }
     }
 }

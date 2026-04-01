@@ -27,7 +27,7 @@ struct PotManager
             }
         }
         if (levels.empty()) return {};
-        
+
         std::sort(levels.begin(), levels.end());
         levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
         
@@ -39,7 +39,6 @@ struct PotManager
         {
             const std::uint32_t delta = cap - prevCap;
             SidePot pot;
-            pot.eligiblePlayers.reserve(n);
             
             for (std::size_t i = 0; i < n; ++i)
             {

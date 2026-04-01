@@ -9,7 +9,6 @@ enum class GameState
     River,
     Showdown,
     Finished,
-    End = Finished,
 };
 enum class ActionType
 {
