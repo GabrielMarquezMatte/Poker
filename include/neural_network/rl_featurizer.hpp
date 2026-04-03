@@ -85,8 +85,11 @@ inline dlib::matrix<float> featurize(const Game &g, std::size_t heroIdx, const B
     float bet_to_pot = (bd.pot > 0) ? static_cast<float>(bd.currentBet) / static_cast<float>(bd.pot) : 0.f;
     float committed_ratio = static_cast<float>(hero.committed) / static_cast<float>(std::max(1u, hero.chips + hero.committed));
 
-    // Position indicator (rough approximation)
-    float position = static_cast<float>(heroIdx) / static_cast<float>(std::max<size_t>(1, ps.size() - 1));
+    // Dealer-relative position: 0 = BTN (acts last post-flop), 1/(n-1) = SB, 2/(n-1) = BB
+    const std::size_t n_seats    = ps.size();
+    const std::size_t dealer_seat = g.dealer();
+    float position = static_cast<float>((heroIdx + n_seats - dealer_seat) % n_seats)
+                   / static_cast<float>(std::max<size_t>(1, n_seats - 1));
 
     // Build feature vector (32 features)
     dlib::matrix<float> x(kInputDims, 1);

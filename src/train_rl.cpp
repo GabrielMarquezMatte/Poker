@@ -10,11 +10,11 @@
 
 int main()
 {
-    std::cout << "=== Poker RL Training (Actor-Critic with Self-Play) ===" << std::endl;
-    std::cout << "Policy Network: 32 -> 256 -> 128 -> 64 -> 5" << std::endl;
+    std::cout << "=== Poker RL Training (PPO with Self-Play + Opponent Pool) ===" << std::endl;
+    std::cout << "Policy Network: 32 -> 512 -> 256 -> 128 -> 5  (PPO clipped surrogate)" << std::endl;
     std::cout << "Value Network:  32 -> 128 -> 64 -> 1" << std::endl;
     std::cout << "Actions: Fold, Check/Call, HalfPot, Pot, AllIn" << std::endl;
-    std::cout << "Features: Self-play, entropy bonus, all-in penalty, adaptive epsilon" << std::endl;
+    std::cout << "Features: Self-play, opponent pool, entropy bonus, adaptive epsilon" << std::endl;
     std::cout << std::endl;
 
     try {
@@ -40,11 +40,12 @@ int main()
         policy_net pnet;
         value_net vnet;
 
-        // Initialize policy network with a forward pass
+        // Initialize policy network with a forward pass (use forward_single, not pnet(input),
+        // because PPO's label_type is PPOLabel and dlib's operator() is only used for training).
         std::cout << "  Policy network..." << std::endl;
         dlib::matrix<float> dummy_input(kInputDims, 1);
         dummy_input = 0;
-        pnet(dummy_input);
+        forward_single(pnet, dummy_input);
         std::cout << "  Policy network initialized." << std::endl;
         
         // Initialize value network with dummy training
@@ -82,6 +83,10 @@ int main()
         constexpr int hands_per_epoch = 300;   // More hands per epoch
         constexpr int checkpoint_interval = 100;
 
+        // Opponent pool: non-hero seats will sometimes play from a past checkpoint.
+        OpponentPool opponent_pool;
+        std::mt19937 pool_rng{std::random_device{}()};
+
         // Persistent trainers: reusing them across epochs preserves SGD momentum
         // between updates, which gives smoother convergence than resetting each epoch.
         dlib::dnn_trainer<policy_net> policy_trainer(pnet, dlib::sgd(0.0005, 0.9));
@@ -117,7 +122,8 @@ int main()
 
             auto stats = train_epoch(pnet, vnet, policy_trainer, value_trainer,
                                      g, rng, blinds, hands_per_epoch,
-                                     epsilon, current_temp, starting_chips, pool, config);
+                                     epsilon, current_temp, starting_chips, pool, config,
+                                     &opponent_pool, &pool_rng);
 
             // Exponential moving average for monitoring
             if (epoch == 0)
@@ -145,13 +151,14 @@ int main()
                           << stats.action_diversity << ")" << std::endl;
             }
 
-            // Periodic checkpoint
+            // Periodic checkpoint — also push a snapshot to the opponent pool.
             if ((epoch + 1) % checkpoint_interval == 0)
             {
                 std::string p_file = "policy_epoch_" + std::to_string(epoch + 1) + ".dat";
                 std::string v_file = "value_epoch_" + std::to_string(epoch + 1) + ".dat";
                 dlib::serialize(p_file) << pnet;
                 dlib::serialize(v_file) << vnet;
+                opponent_pool.push(pnet);  // add current policy snapshot to opponent pool
                 
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time);

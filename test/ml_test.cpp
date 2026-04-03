@@ -296,7 +296,7 @@ TEST(BuildBatch, EmptyTrajectoryDoesNotCrash)
 {
     std::vector<TrajStep> empty;
     std::vector<dlib::matrix<float>> Xp, Xv;
-    std::vector<unsigned long> yp;
+    std::vector<PPOLabel> yp;
     std::vector<float> yv, adv;
     EXPECT_NO_FATAL_FAILURE(build_training_batch(empty, Xp, yp, Xv, yv, adv));
     EXPECT_TRUE(Xp.empty());
@@ -313,7 +313,7 @@ TEST(BuildBatch, ValueBatchReceivesAllSteps)
         make_step(A_CheckCall,   3.f,  3.f),
     };
     std::vector<dlib::matrix<float>> Xp, Xv;
-    std::vector<unsigned long> yp;
+    std::vector<PPOLabel> yp;
     std::vector<float> yv, adv;
     build_training_batch(traj, Xp, yp, Xv, yv, adv);
     EXPECT_EQ(Xv.size(), traj.size());
@@ -331,7 +331,7 @@ TEST(BuildBatch, NormalizedAdvantagesAreFinite)
         make_step(A_CheckCall,  -2.f, -2.f),
     };
     std::vector<dlib::matrix<float>> Xp, Xv;
-    std::vector<unsigned long> yp;
+    std::vector<PPOLabel> yp;
     std::vector<float> yv, adv;
     build_training_batch(traj, Xp, yp, Xv, yv, adv);
     for (float a : adv)
@@ -354,12 +354,13 @@ TEST(BuildBatch, AllInPolicySamplesAreCapped)
         traj.push_back(make_step(A_CheckCall, 1.f, 1.f));
 
     std::vector<dlib::matrix<float>> Xp, Xv;
-    std::vector<unsigned long> yp;
+    std::vector<PPOLabel> yp;
     std::vector<float> yv, adv;
     build_training_batch(traj, Xp, yp, Xv, yv, adv, cfg);
 
-    std::size_t allin_count = std::count(
-        yp.begin(), yp.end(), static_cast<unsigned long>(A_AllIn));
+    std::size_t allin_count = std::count_if(
+        yp.begin(), yp.end(),
+        [](const PPOLabel& l) { return l.action == A_AllIn; });
     // Cap is ceil(100 * 10% / 100) = 10 at most
     std::size_t cap = std::max<std::size_t>(
         1, static_cast<std::size_t>(
@@ -376,13 +377,34 @@ TEST(BuildBatch, SingleStepAllZeroAdvantanceDoesNotCrashNormalization)
         make_step(A_CheckCall, 0.f, 0.f),
     };
     std::vector<dlib::matrix<float>> Xp, Xv;
-    std::vector<unsigned long> yp;
+    std::vector<PPOLabel> yp;
     std::vector<float> yv, adv;
     EXPECT_NO_FATAL_FAILURE(build_training_batch(traj, Xp, yp, Xv, yv, adv));
     for (float a : adv)
     {
         EXPECT_FALSE(std::isnan(a));
         EXPECT_FALSE(std::isinf(a));
+    }
+}
+
+TEST(BuildBatch, PPOLabelContainsCorrectAction)
+{
+    // Verify that PPOLabel.action matches the trajectory action
+    std::vector<TrajStep> traj = {
+        make_step(A_Fold,      1.f, 1.f),
+        make_step(A_CheckCall, 2.f, 2.f),
+        make_step(A_BetPot,    1.5f, 1.5f),
+    };
+    std::vector<dlib::matrix<float>> Xp, Xv;
+    std::vector<PPOLabel> yp;
+    std::vector<float> yv, adv;
+    build_training_batch(traj, Xp, yp, Xv, yv, adv);
+    ASSERT_EQ(yp.size(), traj.size());
+    for (std::size_t i = 0; i < traj.size(); ++i)
+    {
+        EXPECT_EQ(yp[i].action, traj[i].a) << "action mismatch at index " << i;
+        EXPECT_FALSE(std::isnan(yp[i].advantage)) << "advantage NaN at index " << i;
+        EXPECT_FALSE(std::isnan(yp[i].old_log_prob)) << "old_log_prob NaN at index " << i;
     }
 }
 
@@ -395,7 +417,7 @@ protected:
     {
         dlib::matrix<float> dummy(kInputDims, 1);
         dummy = 0;
-        pnet(dummy);  // triggers lazy weight initialization
+        forward_single(pnet, dummy);  // triggers lazy weight initialization
     }
     policy_net pnet;
     std::mt19937 rng{42};
@@ -464,7 +486,7 @@ protected:
         // Initialize policy net
         dlib::matrix<float> dummy(kInputDims, 1);
         dummy = 0;
-        pnet(dummy);
+        forward_single(pnet, dummy);  // use forward_single — pnet(input) uses PPOLabel inference path
         // Initialize value net via one dummy training step
         {
             dlib::dnn_trainer<value_net> t(vnet);

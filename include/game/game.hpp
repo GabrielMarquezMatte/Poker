@@ -321,6 +321,7 @@ public:
     inline constexpr const BetData &betData() const noexcept { return m_betData; }
     inline constexpr const Deck &board() const noexcept { return m_board; }
     inline constexpr std::span<const Player> players() const noexcept { return m_players; }
+    inline constexpr std::size_t dealer() const noexcept { return m_playersData.dealer; }
     inline constexpr std::span<Player> mutablePlayers() noexcept { return m_players; }
     inline constexpr void resetPlayerChips(std::uint32_t chips) noexcept
     {

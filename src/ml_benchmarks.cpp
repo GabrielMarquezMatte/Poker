@@ -218,7 +218,7 @@ static void BM_BuildTrainingBatch(benchmark::State &st)
     for (auto _ : st)
     {
         std::vector<dlib::matrix<float>> Xp, Xv;
-        std::vector<unsigned long> yp;
+        std::vector<PPOLabel> yp;
         std::vector<float> yv, adv;
         build_training_batch(traj, Xp, yp, Xv, yv, adv);
         benchmark::DoNotOptimize(Xp);
