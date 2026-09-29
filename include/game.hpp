@@ -3,6 +3,7 @@
 #include "classification_result.hpp"
 #include "hand.hpp"
 #include "deck.hpp"
+#include "preflop_table.hpp"
 #include <BS_thread_pool.hpp>
 #include <span>
 #include <thread>
@@ -210,16 +211,33 @@ inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, cons
     return stats;
 }
 
-inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+// 13x13 grid of starting hands: pairs on the diagonal, suited hands at [high][low], offsuit at [low][high].
+inline constexpr std::size_t preflopClassIndex(const Deck holeCards) noexcept
+{
+    const std::uint64_t mask = holeCards.getMask();
+    const int first = std::countr_zero(mask);
+    const int second = 63 - std::countl_zero(mask);
+    const int high = std::max(first % 13, second % 13);
+    const int low = std::min(first % 13, second % 13);
+    const bool suited = first / 13 == second / 13;
+    return static_cast<std::size_t>(suited ? high * 13 + low : low * 13 + high);
+}
+
+// Precomputed preflop statistics against random opponents; empty if the table has no entry.
+inline constexpr GameStatistics preflopStatistics(const Deck holeCards, std::size_t numPlayers) noexcept
+{
+    if (holeCards.size() != 2 || numPlayers < 2 || numPlayers > preflopTable.size() + 1)
+    {
+        return {};
+    }
+    const PreflopEntry entry = preflopTable[numPlayers - 2][preflopClassIndex(holeCards)];
+    return {entry.wins, entry.losses, entry.ties};
+}
+
+// Monte Carlo only, split across the pool.
+inline GameStatistics simulateGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
     const std::size_t numThreads = threadPool.get_thread_count();
-    // Enumeration is exact and, up to this size, no slower than the parallel simulation.
-    const std::size_t deckSize = 52 - playerCards.size() - tableCards.size();
-    if (exactDealCount(deckSize, 5 - tableCards.size(), numPlayers - 1) <= static_cast<double>(numSimulations / numThreads))
-    {
-        return exactGameStatistics(playerCards, tableCards, numPlayers);
-    }
-
     const std::size_t simulationsPerThread = numSimulations / numThreads;
     std::vector<std::future<GameStatistics>> threads;
     threads.reserve(numThreads);
@@ -238,6 +256,28 @@ inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const 
         stats += thread.get();
     }
     return stats;
+}
+
+// Cheapest source that is at least as accurate as numSimulations samples:
+// preflop table, then exact enumeration, then simulation.
+inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+{
+    if (tableCards.size() == 0)
+    {
+        const GameStatistics stats = preflopStatistics(playerCards, numPlayers);
+        if (stats.totalGames() >= numSimulations)
+        {
+            return stats;
+        }
+    }
+    const std::size_t numThreads = threadPool.get_thread_count();
+    // Enumeration is exact and, up to this size, no slower than the parallel simulation.
+    const std::size_t deckSize = 52 - playerCards.size() - tableCards.size();
+    if (exactDealCount(deckSize, 5 - tableCards.size(), numPlayers - 1) <= static_cast<double>(numSimulations / numThreads))
+    {
+        return exactGameStatistics(playerCards, tableCards, numPlayers);
+    }
+    return simulateGameStatistics(playerCards, tableCards, numSimulations, numPlayers, threadPool);
 }
 
 // Probability of not losing: ties count as wins.

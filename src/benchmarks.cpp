@@ -423,6 +423,23 @@ static void BM_ProbabilityOfWinningParallel(benchmark::State &st)
 }
 BENCHMARK(BM_ProbabilityOfWinningParallel)->Ranges({{2, 8}, {10'000, 1'000'000}})->Unit(benchmark::kMillisecond);
 
+// API path preflop: answered from the precomputed table when it is at least as accurate
+// as the requested simulations; arg 1 = 0 forces the parallel simulation for comparison.
+static void BM_ProbabilityOfWinningPreflopApi(benchmark::State &st)
+{
+    const Deck playerCards = Deck::parseHand("Kh Qd");
+    const std::size_t numPlayers = st.range(0);
+    BS::thread_pool<BS::tp::none> threadPool(std::thread::hardware_concurrency());
+    for (auto _ : st)
+    {
+        GameStatistics stats = st.range(1)
+                                         ? computeRandomGameStatistics(playerCards, Deck::emptyDeck(), 1'000'000, numPlayers, threadPool)
+                                         : simulateGameStatistics(playerCards, Deck::emptyDeck(), 1'000'000, numPlayers, threadPool);
+        benchmark::DoNotOptimize(stats);
+    }
+}
+BENCHMARK(BM_ProbabilityOfWinningPreflopApi)->ArgsProduct({{2, 6, 10}, {0, 1}})->Unit(benchmark::kMicrosecond);
+
 static void BM_ProbabilityOfWinningParallelScaling(benchmark::State &st)
 {
     omp::XoroShiro128Plus rng(42);

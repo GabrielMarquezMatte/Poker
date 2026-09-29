@@ -95,3 +95,46 @@ TEST(ExactEnumeration, SmallCasesUseExactPath)
     EXPECT_EQ(calculateProbability("ac ks", "td 9c 9s th 2h", 1'000'000, 2),
               static_cast<double>(exact.wins + exact.ties) / static_cast<double>(exact.totalGames()));
 }
+
+TEST(PreflopTable, ClassIndexGroupsAll1326StartingHands)
+{
+    std::array<int, 169> combos{};
+    const std::uint64_t full = Deck::createFullDeck().getMask();
+    forEachCombination(full, 2, 0, [&](std::uint64_t hole)
+                       { ++combos[preflopClassIndex(Deck::from_mask(hole))]; });
+    for (std::size_t row = 0; row < 13; ++row)
+    {
+        for (std::size_t col = 0; col < 13; ++col)
+        {
+            const int expected = row == col ? 6 : (row > col ? 4 : 12); // pair / suited / offsuit
+            EXPECT_EQ(combos[row * 13 + col], expected) << "row " << row << " col " << col;
+        }
+    }
+}
+
+TEST(PreflopTable, EntriesMatchFreshSimulation)
+{
+    const auto check = [](std::string_view hole, std::size_t players)
+    {
+        const Deck cards = Deck::parseHand(hole);
+        const GameStatistics table = preflopStatistics(cards, players);
+        ASSERT_GT(table.totalGames(), 0u) << "preflop table not generated";
+        omp::XoroShiro128Plus rng{2024};
+        const GameStatistics fresh = computeRandomGameStatistics(rng, cards, Deck::emptyDeck(), 1'000'000, players);
+        const auto notLosing = [](const GameStatistics &s)
+        { return static_cast<double>(s.wins + s.ties) / static_cast<double>(s.totalGames()); };
+        EXPECT_NEAR(notLosing(table), notLosing(fresh), 0.003) << hole << " vs " << players - 1 << " opponents";
+    };
+    check("as ah", 2);
+    check("7c 2d", 6);
+    check("js ts", 10);
+    check("kh qd", 4);
+}
+
+TEST(PreflopTable, ApiPathUsesTable)
+{
+    const GameStatistics table = preflopStatistics(Deck::parseHand("as ah"), 2);
+    ASSERT_GT(table.totalGames(), 0u);
+    EXPECT_EQ(calculateProbability("as ah", "", 1'000'000, 2),
+              static_cast<double>(table.wins + table.ties) / static_cast<double>(table.totalGames()));
+}
