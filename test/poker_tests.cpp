@@ -1,4 +1,8 @@
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <numeric>
+#include <random>
+#include <vector>
 #include "../include/hand.hpp"
 #include "../include/deck.hpp"
 #include "../include/card.hpp"
@@ -122,9 +126,6 @@ TEST(DeckTest, ClassifyHighCard)
     static_assert(result == ClassificationResult(Classification::HighCard, Rank{}, Rank::Ace | Rank::Seven | Rank::Six | Rank::Four | Rank::Two), "Expected High Card classification");
 }
 
-//
-// 1) Wheel (A-2-3-4-5) Straight / Straight‐Flush
-//
 TEST(ClassificationTest, ClassifyWheelStraight)
 {
     static constexpr Deck deck = Deck::createDeck({Card(Suit::Clubs, Rank::Five),
@@ -154,7 +155,6 @@ TEST(ClassificationTest, StraightComparisonByTopCard)
 }
 TEST(ClassificationTest, classifyPlayerBestOfSeven)
 {
-    // hole + 5-card board that makes a Flush, but board alone is only a Pair
     static constexpr Deck hole = Deck::createDeck({Card(Suit::Spades, Rank::King),
                                                    Card(Suit::Spades, Rank::Queen)});
     static constexpr Deck board = Deck::createDeck({Card(Suit::Spades, Rank::Two),
@@ -162,7 +162,6 @@ TEST(ClassificationTest, classifyPlayerBestOfSeven)
                                                     Card(Suit::Spades, Rank::Four),
                                                     Card(Suit::Hearts, Rank::Ace),
                                                     Card(Suit::Hearts, Rank::King)});
-    // best 5 of 7 is a Spade flush King-high
     static constexpr ClassificationResult res = Hand::classify(Deck::createDeck({hole, board}));
     static constexpr ClassificationResult expected = ClassificationResult(Classification::Flush, Rank::King | Rank::Queen | Rank::Four | Rank::Three | Rank::Two);
     static_assert(res == expected, "Expected best hand to be a King-high Flush");
@@ -216,7 +215,6 @@ TEST(ClassificationTest, OnePairKickerComparison)
     static_assert(pairHighJack > pairHighTen, "Pair with Jack kicker should beat Pair with Ten kicker");
 }
 
-// 7) Two-Pair kicker comparison: AA QQ K beats AA JJ K
 TEST(ClassificationTest, TwoPairKickerComparison)
 {
     static constexpr ClassificationResult twoPairQHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Queen, Rank::King);
@@ -224,7 +222,6 @@ TEST(ClassificationTest, TwoPairKickerComparison)
     static_assert(twoPairQHigh > twoPairJHigh, "Two Pair with Queen kicker should beat Two Pair with Jack kicker");
 }
 
-// 8) Flush kicker comparison: A K Q J 10 ♠ beats A K Q J 9 ♠
 TEST(ClassificationTest, FlushKickerComparison)
 {
     static constexpr ClassificationResult flushWithTen = ClassificationResult(Classification::Flush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten);
@@ -232,7 +229,6 @@ TEST(ClassificationTest, FlushKickerComparison)
     static_assert(flushWithTen > flushWithNine, "Flush with Ten kicker should beat Flush with Nine kicker");
 }
 
-// 9) Streaming operator: verify human-readable output
 TEST(StreamingTest, ClassificationResultToString)
 {
     static constexpr ClassificationResult cr(Classification::Pair, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack);
@@ -241,7 +237,6 @@ TEST(StreamingTest, ClassificationResultToString)
     EXPECT_EQ(oss.str(), "Pair: J Q K A");
 }
 
-// 11) checkUniqueCards
 TEST(GameTest, CheckUniqueCards)
 {
     static constexpr Deck p = Deck::createDeck({Card(Suit::Hearts, Rank::Ace)});
@@ -281,10 +276,8 @@ TEST(GameCompareTest, PlayerLosesToHigherOpponent)
 
 TEST(GameCompareTest, PlayerTiesWithSameBestHand)
 {
-    // Both have same hole cards ranks but different suits; board makes the same two pair from board + kickers
     static constexpr Deck player = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Spades, Rank::King)});
     static constexpr Deck opp = Deck::createDeck({Card(Suit::Diamonds, Rank::Ace), Card(Suit::Clubs, Rank::King)});
-    // Board pairs A and K with equal kickers such that both best 5 are identical
     static constexpr Deck board = Deck::createDeck({Card(Suit::Hearts, Rank::Ace), Card(Suit::Diamonds, Rank::King),
                                                     Card(Suit::Clubs, Rank::Queen), Card(Suit::Spades, Rank::Jack),
                                                     Card(Suit::Hearts, Rank::Ten)});
@@ -377,8 +370,6 @@ TEST(DeckTest, PopRandomCards)
 
 TEST(BugReproduction, StaticAssert_WheelStraightWithKickers)
 {
-    // Bug: Wheel Straight (A-2-3-4-5) com Kickers
-    // Se a lógica falhar, o compilador emitirá erro aqui.
     static constexpr Deck hand = Deck::parseHand("2c 3d 4h 5s ac 9d kd");
     static constexpr ClassificationResult result = Hand::classify(hand);
     
@@ -388,30 +379,23 @@ TEST(BugReproduction, StaticAssert_WheelStraightWithKickers)
 
 TEST(BugReproduction, StaticAssert_RoyalFlushWithExtraSuitedCard)
 {
-    // Bug: Royal Flush com carta extra do mesmo naipe (9s)
-    // Se a lógica falhar (classificar como Straight Flush), a compilação para.
     static constexpr Deck hand = Deck::parseHand("as ks qs js ts 9s 2c");
     static constexpr ClassificationResult result = Hand::classify(hand);
     
-    // Verifica se é estritamente Royal Flush
     static_assert(result.getClassification() == Classification::RoyalFlush, 
         "FALHA DE COMPILACAO: Classificou incorretamente Royal Flush 'sujo' como Straight Flush.");
 }
 
 TEST(EdgeCases, StaticAssert_Complex7CardHands)
 {
-    // Caso: 3 Pares no Board -> Deve escolher os 2 maiores (AA, KK) com kicker Q
     static constexpr Deck threePairHand = Deck::parseHand("as ac ks kc qs qc 2h");
     static_assert(Hand::classify(threePairHand) == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King, Rank::Queen),
         "FALHA DE COMPILACAO: Erro ao escolher os melhores 2 pares de 3 possiveis.");
 
-    // Caso: Wheel Straight Flush com Kicker do mesmo naipe
     static constexpr Deck wheelSFHand = Deck::parseHand("5h 4h 3h 2h ah 9h kd");
     static_assert(Hand::classify(wheelSFHand) == ClassificationResult(Classification::StraightFlush, Rank::Five),
         "FALHA DE COMPILACAO: Erro ao detetar Wheel Straight Flush com kicker suited.");
 
-    // Caso: Quads vs Full House (Prioridade)
-    // Board: 5555, Mão: AA. Resultado deve ser Quads (5555 A), nunca Full House.
     static constexpr Deck quadsHand = Deck::parseHand("5c 5d 5h 5s as ac 2d");
     static_assert(Hand::classify(quadsHand).getClassification() == Classification::FourOfAKind,
         "FALHA DE COMPILACAO: Full House foi priorizado indevidamente sobre Four of a Kind.");
@@ -425,16 +409,10 @@ TEST(BugReproduction, PairEquality_DifferentPairs)
     static constexpr ClassificationResult r1 = Hand::classify(Deck::createDeck({p1, board}));
     static constexpr ClassificationResult r2 = Hand::classify(Deck::createDeck({p2, board}));
 
-    // Now that we fix the implementation, r1 > r2 because Pair of Aces (Main=A) >
-    // Pair of Kings (Main=K).
     static_assert(r1 > r2, "Pair of Aces should beat Pair of Kings despite having same kickers/ranks.");
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Bug-fix regression tests
-// ─────────────────────────────────────────────────────────────────
 
-// Bug 1: FullHouse comparison — trips rank must dominate
 TEST(BugFix, FullHouse_TripsRankDominates)
 {
     static constexpr Deck aaakk = Deck::parseHand("Ah Ac Ad Kh Kd");
@@ -446,7 +424,6 @@ TEST(BugFix, FullHouse_TripsRankDominates)
     static_assert(r1 > r2, "AAAKK must beat KKKAA");
 }
 
-// Bug 1: FullHouse comparison — same trips, pair rank breaks tie
 TEST(BugFix, FullHouse_PairRankBreaksTie)
 {
     static constexpr Deck aaakk = Deck::parseHand("Ah Ac Ad Kh Kd");
@@ -456,7 +433,6 @@ TEST(BugFix, FullHouse_PairRankBreaksTie)
     static_assert(r1 > r2, "AAAKK must beat AAAQQ (same trips, K > Q pair)");
 }
 
-// Bug 2: Two ranks each appearing 3 times must classify as FullHouse, not ThreeOfAKind
 TEST(BugFix, DoubleTrips_ClassifiesAsFullHouse)
 {
     static constexpr Deck hand = Deck::parseHand("Ah Ad Ac Kh Kd Ks 2c");
@@ -465,20 +441,17 @@ TEST(BugFix, DoubleTrips_ClassifiesAsFullHouse)
         "3A + 3K + x must be FullHouse, not ThreeOfAKind");
 }
 
-// Bug 2: Double-trips FullHouse — higher trips still wins
 TEST(BugFix, DoubleTrips_HigherTripsWins)
 {
-    static constexpr Deck hand1 = Deck::parseHand("Ah Ad Ac Kh Kd Ks 2c"); // best FH: AAAKK
-    static constexpr Deck hand2 = Deck::parseHand("Kh Kd Kc Qh Qd Qs 2c"); // best FH: KKKQQ
+    static constexpr Deck hand1 = Deck::parseHand("Ah Ad Ac Kh Kd Ks 2c"); 
+    static constexpr Deck hand2 = Deck::parseHand("Kh Kd Kc Qh Qd Qs 2c"); 
     static constexpr ClassificationResult r1 = Hand::classify(hand1);
     static constexpr ClassificationResult r2 = Hand::classify(hand2);
     static_assert(r1 > r2, "AAAKK must beat KKKQQ (from double-trips hands)");
 }
 
-// Bug 3: 7-card HighCard — irrelevant 6th/7th kickers must not affect comparison
 TEST(BugFix, HighCard_7Card_KickerNormalization)
 {
-    // Both share best 5: A K Q J 9. The 6th card differs (8 vs 7) — must be a tie.
     static constexpr Deck hand1 = Deck::parseHand("8s 2h Ac Kd Qh Js 9d");
     static constexpr Deck hand2 = Deck::parseHand("7d 2c Ac Kd Qh Js 9d");
     static constexpr ClassificationResult r1 = Hand::classify(hand1);
@@ -487,10 +460,8 @@ TEST(BugFix, HighCard_7Card_KickerNormalization)
     static_assert(r1 == r2, "Both share best 5 (AKQJ9); irrelevant 6th card must not break tie");
 }
 
-// Bug 3: 7-card ThreeOfAKind — irrelevant 4th/5th kickers must not affect comparison
 TEST(BugFix, ThreeOfAKind_7Card_KickerNormalization)
 {
-    // Trips Aces; both share best kickers 8 7. The 4th kicker differs (5 vs 4) — must be a tie.
     static constexpr Deck hand1 = Deck::parseHand("5c 6d Ah Ad As 8c 7h");
     static constexpr Deck hand2 = Deck::parseHand("4c 6d Ah Ad As 8c 7h");
     static constexpr ClassificationResult r1 = Hand::classify(hand1);
@@ -499,10 +470,8 @@ TEST(BugFix, ThreeOfAKind_7Card_KickerNormalization)
     static_assert(r1 == r2, "Both have AAA87 as best 5; irrelevant 4th kicker must not break tie");
 }
 
-// Bug 3: 7-card FourOfAKind — irrelevant 3rd+ kickers must not affect comparison
 TEST(BugFix, FourOfAKind_7Card_KickerNormalization)
 {
-    // Quads Aces + K kicker. Extra cards J vs T are irrelevant — must be a tie.
     static constexpr Deck hand1 = Deck::parseHand("Ah Ac Ad As Kh Jd 2c");
     static constexpr Deck hand2 = Deck::parseHand("Ah Ac Ad As Kh Td 2c");
     static constexpr ClassificationResult r1 = Hand::classify(hand1);
@@ -511,10 +480,8 @@ TEST(BugFix, FourOfAKind_7Card_KickerNormalization)
     static_assert(r1 == r2, "Both have AAAA K as best 5; irrelevant 3rd card must not break tie");
 }
 
-// Bug 4: Flush with 6 same-suit cards — irrelevant 6th suit card must not affect comparison
 TEST(BugFix, Flush_6Cards_KickerNormalization)
 {
-    // 6 hearts; both share top 5 (A K Q J 9). 6th heart differs (8H vs 7H) — must be a tie.
     static constexpr Deck hand1 = Deck::parseHand("Ah Kh Qh Jh 9h 8h 2d");
     static constexpr Deck hand2 = Deck::parseHand("Ah Kh Qh Jh 9h 7h 2d");
     static constexpr ClassificationResult r1 = Hand::classify(hand1);
@@ -523,10 +490,8 @@ TEST(BugFix, Flush_6Cards_KickerNormalization)
     static_assert(r1 == r2, "Both have AhKhQhJh9h as best flush; irrelevant 6th heart must not break tie");
 }
 
-// Bug 4: 6-card flush must still detect the wheel straight flush correctly
 TEST(BugFix, Flush_6Cards_WheelStraightFlushStillDetected)
 {
-    // 6 hearts including A-2-3-4-5; 9H is the extra card that must not interfere
     static constexpr Deck hand = Deck::parseHand("5h 4h 3h 2h Ah 9h Kd");
     static constexpr ClassificationResult result = Hand::classify(hand);
     static_assert(result.getClassification() == Classification::StraightFlush,
@@ -535,7 +500,6 @@ TEST(BugFix, Flush_6Cards_WheelStraightFlushStillDetected)
         "Must be 5-high straight flush (wheel)");
 }
 
-// Bug 5: made-hand ranks and kickers shared one 13-bit mask, so different hands collided.
 static constexpr ClassificationResult classifyWith(std::string_view board, std::string_view hole)
 {
     return Hand::classify(Deck::createDeck({Deck::parseHand(board), Deck::parseHand(hole)}));
@@ -543,25 +507,21 @@ static constexpr ClassificationResult classifyWith(std::string_view board, std::
 
 TEST(BugFix, Trips_HigherTripsWinsWithSameRankSet)
 {
-    // KKK QJ vs QQQ KJ: same rank set {K,Q,J}
     static_assert(classifyWith("Kh Qd Jc 4s 2h", "Ks Kd") > classifyWith("Kh Qd Jc 4s 2h", "Qs Qc"));
 }
 
 TEST(BugFix, TwoPair_HigherSecondPairWinsWithSameRankSet)
 {
-    // KK QQ 5 vs KK 55 Q: same rank set {K,Q,5}
     static_assert(classifyWith("Kh Ks 5h 5s Qd", "Qc 2d") > classifyWith("Kh Ks 5h 5s Qd", "3c 4d"));
 }
 
 TEST(BugFix, Pair_LowKickerBreaksTie)
 {
-    // 99 KQ5 vs 99 KQ4: kickers below Six used to be dropped
     static_assert(classifyWith("9h Kd Qc 3s 2h", "9s 5d") > classifyWith("9h Kd Qc 3s 2h", "9c 4d"));
 }
 
 TEST(BugFix, Quads_HigherQuadsWinsWithSameRankSet)
 {
-    // KKKK 5 vs 5555 K: same rank set {K,5}
     static_assert(classifyWith("Kh Kd 5h 5d 3c", "Ks Kc") > classifyWith("Kh Kd 5h 5d 3c", "5s 5c"));
 }
 
@@ -570,4 +530,125 @@ TEST(StreamingTest, PairPrintsPairThenKickers)
     std::ostringstream oss;
     oss << classifyWith("9h Kd Qc 3s 2h", "9s 5d");
     EXPECT_EQ(oss.str(), "Pair: 9 + 5 Q K");
+}
+
+namespace reference
+{
+    static std::vector<int> score5(const std::array<int, 5> &cards)
+    {
+        std::array<int, 13> count{};
+        bool flush = true;
+        for (int card : cards)
+        {
+            ++count[card % 13];
+            flush &= card / 13 == cards[0] / 13;
+        }
+        std::vector<std::pair<int, int>> groups; 
+        for (int rank = 12; rank >= 0; --rank)
+        {
+            if (count[rank])
+            {
+                groups.push_back({count[rank], rank});
+            }
+        }
+        std::stable_sort(groups.begin(), groups.end(), [](auto a, auto b) { return a.first > b.first; });
+        int straightHigh = -1;
+        if (groups.size() == 5)
+        {
+            if (groups[0].second - groups[4].second == 4)
+            {
+                straightHigh = groups[0].second;
+            }
+            else if (groups[0].second == 12 && groups[1].second == 3)
+            {
+                straightHigh = 3; 
+            }
+        }
+        int category = 0;
+        if (straightHigh >= 0 && flush) { category = 8; }
+        else if (groups[0].first == 4) { category = 7; }
+        else if (groups[0].first == 3 && groups[1].first == 2) { category = 6; }
+        else if (flush) { category = 5; }
+        else if (straightHigh >= 0) { category = 4; }
+        else if (groups[0].first == 3) { category = 3; }
+        else if (groups[0].first == 2 && groups[1].first == 2) { category = 2; }
+        else if (groups[0].first == 2) { category = 1; }
+        std::vector<int> score{category};
+        if (straightHigh >= 0)
+        {
+            score.push_back(straightHigh);
+        }
+        else
+        {
+            for (auto [c, rank] : groups)
+            {
+                score.push_back(rank);
+            }
+        }
+        return score;
+    }
+
+    static std::vector<int> score7(const std::array<int, 7> &cards)
+    {
+        std::vector<int> best;
+        for (int skipA = 0; skipA < 7; ++skipA)
+        {
+            for (int skipB = skipA + 1; skipB < 7; ++skipB)
+            {
+                std::array<int, 5> hand{};
+                int k = 0;
+                for (int i = 0; i < 7; ++i)
+                {
+                    if (i != skipA && i != skipB)
+                    {
+                        hand[k++] = cards[i];
+                    }
+                }
+                best = std::max(best, score5(hand));
+            }
+        }
+        return best;
+    }
+
+    static Deck toDeck(const std::array<int, 7> &cards)
+    {
+        std::uint64_t mask = 0;
+        for (int card : cards)
+        {
+            mask |= 1ull << card;
+        }
+        return Deck::from_mask(mask);
+    }
+}
+
+TEST(DifferentialFuzz, ClassifyOrdersHandsLikeBruteForce)
+{
+    std::mt19937_64 rng(7);
+    std::array<int, 52> deck{};
+    std::iota(deck.begin(), deck.end(), 0);
+    int mismatches = 0;
+    for (int trial = 0; trial < 100'000 && mismatches < 5; ++trial)
+    {
+        std::shuffle(deck.begin(), deck.end(), rng);
+        if (trial & 1)
+        {
+            std::stable_partition(deck.begin(), deck.end(), [](int card) { return card % 13 < 5; });
+        }
+        const std::array<int, 7> a{deck[0], deck[1], deck[2], deck[3], deck[4], deck[5], deck[6]};
+        const std::array<int, 7> b{deck[0], deck[1], deck[2], deck[3], deck[4], deck[7], deck[8]}; 
+        const auto refA = reference::score7(a);
+        const auto refB = reference::score7(b);
+        const ClassificationResult engA = Hand::classify(reference::toDeck(a));
+        const ClassificationResult engB = Hand::classify(reference::toDeck(b));
+        const int expected = (refA > refB) - (refA < refB);
+        const int actual = (engA > engB) - (engA < engB);
+        const bool royal = refA[0] == 8 && refA[1] == 12;
+        const auto expectedCategory = static_cast<Classification>(1u << (refA[0] + (royal ? 1 : 0)));
+        if (expected != actual || engA.getClassification() != expectedCategory)
+        {
+            ++mismatches;
+            ADD_FAILURE() << engA << " vs " << engB << ": expected " << expected << ", got " << actual;
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
 }

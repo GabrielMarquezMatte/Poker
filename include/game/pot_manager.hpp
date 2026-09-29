@@ -54,8 +54,6 @@ struct PotManager
             
             if (pot.eligiblePlayers.empty())
             {
-                // Layer funded only by folded players (uncalled bet): contributors get it back.
-                // Every contributor put in exactly delta, so an even split is an exact refund.
                 for (std::size_t i = 0; i < n; ++i)
                 {
                     if (players[i].invested > prevCap)

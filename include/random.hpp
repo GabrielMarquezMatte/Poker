@@ -1,4 +1,3 @@
-// Implementation from https://github.com/zekyll/OMPEval
 #ifndef OMP_RANDOM_H
 #define OMP_RANDOM_H
 #include <cstdint>
@@ -14,7 +13,6 @@ namespace omp
         z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
         return z ^ (z >> 31);
     }
-    // Fast 64-bit PRNG with a period of 2^128-1.
     class XoroShiro128Plus
     {
     public:
@@ -58,8 +56,6 @@ namespace omp
         std::array<std::uint64_t, 2> mState;
     };
 
-    // Simple and fast uniform int distribution for small ranges. Has a bias similar to the classic modulo
-    // method, but it's good enough for most poker simulations.
     template <typename T = unsigned, unsigned tBits = 21>
     class FastUniformIntDistribution
     {

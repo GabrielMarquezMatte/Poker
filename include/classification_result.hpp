@@ -2,10 +2,6 @@
 #define __POKER_CLASSIFICATION_RESULT_HPP__
 #include <compare>
 #include "card_enums.hpp"
-// Layout: [category index:4][primary ranks:13][kicker ranks:13].
-// primary = ranks forming the made hand (pair/trips/quads, or the whole mask for
-// straight/flush); kickers = tie breakers (all five cards for high card).
-// Compares as a single integer.
 struct ClassificationResult
 {
 private:
@@ -16,7 +12,6 @@ public:
         : m_mask((static_cast<std::uint32_t>(getClassificationIndex(classification)) << 26) | (static_cast<std::uint32_t>(primary) << 13) | kickers) {}
     inline constexpr ClassificationResult(const Classification classification, const Rank primary, const Rank kickers = Rank{}) noexcept
         : ClassificationResult(classification, static_cast<std::uint16_t>(primary), static_cast<std::uint16_t>(kickers)) {}
-    // For category indices computed at runtime (0 = HighCard ... 9 = RoyalFlush).
     static inline constexpr ClassificationResult fromIndex(const std::uint32_t categoryIndex, const std::uint16_t primary, const std::uint16_t kickers) noexcept
     {
         ClassificationResult result;

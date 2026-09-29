@@ -46,13 +46,12 @@ TEST(ExecutionTests, QHighFlushVsTheFieldOnA4SpadeBoard)
 
 TEST(ExecutionTests, TwoPairOnTheBoardKickerWars)
 {
-    // Opponent overpairs (JJ+) make a higher two pair (e.g. QQ TT 9) and beat TT 99 A.
     double probability = calculateProbability("ac ks", "td 9c 9s th 2h", 500'000, 8);
     EXPECT_GE(probability, 0.165);
     EXPECT_LE(probability, 0.185);
 }
 
-TEST(ExecutionTests, StraightOnPairedBoardVsTheField) // Nome corrigido
+TEST(ExecutionTests, StraightOnPairedBoardVsTheField) 
 {
     double probability = calculateProbability("jh 6h", "qs 8d ts td 9c", 500'000, 8);
     EXPECT_GE(probability, 0.74);
@@ -68,16 +67,15 @@ TEST(ExecutionTests, JHighFlushVsTheField)
 TEST(ExactEnumeration, RiverHeadsUpCoversEveryOpponentHand)
 {
     const GameStatistics stats = exactGameStatistics(Deck::parseHand("ac ks"), Deck::parseHand("td 9c 9s th 2h"), 2);
-    EXPECT_EQ(stats.totalGames(), 990u); // C(45, 2)
+    EXPECT_EQ(stats.totalGames(), 990u); 
 }
 
 TEST(ExactEnumeration, MatchesSimulationMultiway)
 {
-    // 3-way on the turn: exact counts every deal, simulation must agree within sampling error.
     const Deck player = Deck::parseHand("jh 6h");
     const Deck board = Deck::parseHand("qs 8h th 2h");
     const GameStatistics exact = exactGameStatistics(player, board, 3);
-    EXPECT_EQ(exact.totalGames(), 46u * 990u * 903u); // river card, then two ordered hole pairs
+    EXPECT_EQ(exact.totalGames(), 46u * 990u * 903u); 
     omp::XoroShiro128Plus rng{7};
     const GameStatistics simulated = computeRandomGameStatistics(rng, player, board, 2'000'000, 3);
     const auto ratio = [](std::size_t part, const GameStatistics &s)
@@ -88,7 +86,6 @@ TEST(ExactEnumeration, MatchesSimulationMultiway)
 
 TEST(ExactEnumeration, SmallCasesUseExactPath)
 {
-    // River heads-up has 990 deals, far below the simulation budget, so the answer is exact.
     const Deck player = Deck::parseHand("ac ks");
     const Deck board = Deck::parseHand("td 9c 9s th 2h");
     const GameStatistics exact = exactGameStatistics(player, board, 2);
@@ -106,7 +103,7 @@ TEST(PreflopTable, ClassIndexGroupsAll1326StartingHands)
     {
         for (std::size_t col = 0; col < 13; ++col)
         {
-            const int expected = row == col ? 6 : (row > col ? 4 : 12); // pair / suited / offsuit
+            const int expected = row == col ? 6 : (row > col ? 4 : 12); 
             EXPECT_EQ(combos[row * 13 + col], expected) << "row " << row << " col " << col;
         }
     }
@@ -122,8 +119,9 @@ TEST(PreflopTable, EntriesMatchFreshSimulation)
         omp::XoroShiro128Plus rng{2024};
         const GameStatistics fresh = computeRandomGameStatistics(rng, cards, Deck::emptyDeck(), 1'000'000, players);
         const auto notLosing = [](const GameStatistics &s)
-        { return static_cast<double>(s.wins + s.ties) / static_cast<double>(s.totalGames()); };
+        { return s.notLosing(); };
         EXPECT_NEAR(notLosing(table), notLosing(fresh), 0.003) << hole << " vs " << players - 1 << " opponents";
+        EXPECT_NEAR(table.equity(), fresh.equity(), 0.003) << hole << " vs " << players - 1 << " opponents";
     };
     check("as ah", 2);
     check("7c 2d", 6);
@@ -137,4 +135,36 @@ TEST(PreflopTable, ApiPathUsesTable)
     ASSERT_GT(table.totalGames(), 0u);
     EXPECT_EQ(calculateProbability("as ah", "", 1'000'000, 2),
               static_cast<double>(table.wins + table.ties) / static_cast<double>(table.totalGames()));
+}
+
+TEST(Equity, BoardPlaysSplitsPotEvenly)
+{
+    const GameStatistics stats = computeRandomGameStatistics(Deck::parseHand("2c 7d"), Deck::parseHand("ts js qs ks as"), 1'000'000, 3, threadPool);
+    EXPECT_EQ(stats.ties, stats.totalGames());
+    EXPECT_DOUBLE_EQ(stats.notLosing(), 1.0);
+    EXPECT_DOUBLE_EQ(stats.equity(), 1.0 / 3.0);
+}
+
+TEST(Equity, SimulationMatchesExactMultiway)
+{
+    const Deck player = Deck::parseHand("jh 6h");
+    const Deck board = Deck::parseHand("qs 8h th 2h");
+    const GameStatistics exact = exactGameStatistics(player, board, 3);
+    omp::XoroShiro128Plus rng{11};
+    const GameStatistics simulated = computeRandomGameStatistics(rng, player, board, 2'000'000, 3);
+    EXPECT_NEAR(exact.equity(), simulated.equity(), 0.002);
+    EXPECT_LE(exact.equity(), exact.notLosing());
+}
+
+TEST(ExactEnumeration, ParallelMatchesSequential)
+{
+    const Deck player = Deck::parseHand("ah kd");
+    const Deck board = Deck::parseHand("kc 7s 2h");
+    const GameStatistics sequential = exactGameStatistics(player, board, 2);
+    const GameStatistics parallel = exactGameStatistics(player, board, 2, threadPool);
+    EXPECT_EQ(sequential.totalGames(), 1081u * 990u); 
+    EXPECT_EQ(parallel.wins, sequential.wins);
+    EXPECT_EQ(parallel.losses, sequential.losses);
+    EXPECT_EQ(parallel.ties, sequential.ties);
+    EXPECT_EQ(parallel.potShares, sequential.potShares);
 }

@@ -50,15 +50,11 @@ TEST(GameBasics, PostsBlindsAndSetsInitialBets)
         return game;
     }();
 
-    // After posting blinds, pot == SB + BB
     EXPECT_EQ(g.betData().pot, blinds.smallBlind + blinds.bigBlind);
 
-    // currentBet equals (effective) big blind
     EXPECT_EQ(g.betData().currentBet, blinds.bigBlind);
 
-    // minRaise defaults to big blind at the start of preflop
     EXPECT_EQ(g.betData().minRaise, blinds.bigBlind);
 
-    // There must be at least 2 alive
     EXPECT_GE(count_alive(g.players()), 2);
 }

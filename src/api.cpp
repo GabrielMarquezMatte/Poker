@@ -15,7 +15,6 @@ struct glz::from<glz::JSON, Deck>
         if (bool(ctx.error))
             return;
         value = Deck::parseHand(str_value);
-        // parseHand silently skips invalid and repeated cards; reject them instead.
         const auto tokens = std::ranges::count_if(str_value | std::views::split(' '), [](auto &&token)
                                                   { return !std::ranges::empty(token); });
         if (static_cast<std::size_t>(tokens) != value.size())
@@ -57,74 +56,81 @@ struct ErrorResponse
 
 struct ProbabilityResult
 {
-    double probability;
+    double probability; 
+    double equity;      
 };
 
-template<typename TFunc>
-static void handleRequest(const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, TFunc &&logicFunc)
+struct StatisticsResult
 {
-    const auto badRequest = [&](std::string_view message)
-    {
-        auto objectJson = glz::write_json(ErrorResponse{message});
-        auto resp = drogon::HttpResponse::newHttpResponse();
-        if (!objectJson)
-        {
-            resp->setStatusCode(drogon::HttpStatusCode::k500InternalServerError);
-            callback(resp);
-            return;
-        }
-        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-        resp->setBody(std::move(*objectJson));
-        resp->setStatusCode(drogon::HttpStatusCode::k400BadRequest);
-        callback(resp);
-    };
-    std::string_view body = req->getBody();
-    ProbabilitiesRequest probReq;
-    auto error = glz::read_json(probReq, body);
-    if (error)
-    {
-        badRequest(glz::format_error(error, body));
-        return;
-    }
-    if (probReq.hand.size() != 2 || probReq.table.size() > 5 || (probReq.hand.getMask() & probReq.table.getMask()) != 0)
-    {
-        badRequest("hand must have 2 cards, table at most 5, and no card may appear in both");
-        return;
-    }
-    auto result = logicFunc(probReq);
-    auto jsonResponse = glz::write_json(result);
+    std::size_t wins;
+    std::size_t losses;
+    std::size_t ties;
+    double equity;
+};
+
+using Callback = std::function<void(const drogon::HttpResponsePtr &)>;
+
+static void respond(const Callback &callback, drogon::HttpStatusCode status, const auto &body)
+{
+    auto json = glz::write_json(body);
     auto resp = drogon::HttpResponse::newHttpResponse();
-    if (!jsonResponse)
+    if (!json)
     {
         resp->setStatusCode(drogon::HttpStatusCode::k500InternalServerError);
         callback(resp);
         return;
     }
-    resp->setStatusCode(drogon::HttpStatusCode::k200OK);
+    resp->setStatusCode(status);
     resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-    resp->setBody(std::move(*jsonResponse));
+    resp->setBody(std::move(*json));
     callback(resp);
+}
+
+struct Pools
+{
+    BS::thread_pool<BS::tp::none> compute{std::thread::hardware_concurrency()};
+    BS::thread_pool<BS::tp::none> requests{4};
+};
+
+template <typename TToResponse>
+static void handleRequest(const drogon::HttpRequestPtr &req, Callback &&callback, Pools &pools, TToResponse toResponse)
+{
+    std::string_view body = req->getBody();
+    ProbabilitiesRequest r;
+    auto error = glz::read_json(r, body);
+    if (error)
+    {
+        respond(callback, drogon::HttpStatusCode::k400BadRequest, ErrorResponse{glz::format_error(error, body)});
+        return;
+    }
+    if (r.hand.size() != 2 || r.table.size() > 5 || (r.hand.getMask() & r.table.getMask()) != 0)
+    {
+        respond(callback, drogon::HttpStatusCode::k400BadRequest, ErrorResponse{"hand must have 2 cards, table at most 5, and no card may appear in both"});
+        return;
+    }
+    if (const auto quick = quickGameStatistics(r.hand, r.table, r.numSimulations, r.numPlayers))
+    {
+        respond(callback, drogon::HttpStatusCode::k200OK, toResponse(*quick));
+        return;
+    }
+    pools.requests.detach_task([callback = std::move(callback), r, toResponse, &pools]()
+                               {
+        const GameStatistics stats = computeRandomGameStatistics(r.hand, r.table, r.numSimulations, r.numPlayers, pools.compute);
+        respond(callback, drogon::HttpStatusCode::k200OK, toResponse(stats)); });
 }
 
 int main()
 {
     auto &app = drogon::app();
-    std::size_t numThreads = std::thread::hardware_concurrency();
-    BS::thread_pool threadPool(numThreads);
-    app.registerHandler("/statistics", [&threadPool](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback)
-    { 
-        handleRequest(req, std::move(callback), [&threadPool](const ProbabilitiesRequest& probReq) { 
-            return computeRandomGameStatistics(probReq.hand, probReq.table, probReq.numSimulations, probReq.numPlayers, threadPool); 
-        }); 
-    }, {drogon::Post});
-    app.registerHandler("/probabilities", [&threadPool](const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback)
-    { 
-        handleRequest(req, std::move(callback), [&threadPool](const ProbabilitiesRequest& probReq) { 
-            return ProbabilityResult{ probabilityOfWinning(probReq.hand, probReq.table, probReq.numSimulations, probReq.numPlayers, threadPool) }; 
-        }); 
-    }, {drogon::Post});
+    Pools pools;
+    app.registerHandler("/statistics", [&](const drogon::HttpRequestPtr &req, Callback &&callback)
+                        { handleRequest(req, std::move(callback), pools, [](const GameStatistics &s)
+                                        { return StatisticsResult{s.wins, s.losses, s.ties, s.equity()}; }); }, {drogon::Post});
+    app.registerHandler("/probabilities", [&](const drogon::HttpRequestPtr &req, Callback &&callback)
+                        { handleRequest(req, std::move(callback), pools, [](const GameStatistics &s)
+                                        { return ProbabilityResult{s.notLosing(), s.equity()}; }); }, {drogon::Post});
     app.enableGzip(true);
     app.addListener("0.0.0.0", 8080);
-    app.setThreadNum(numThreads);
+    app.setThreadNum(std::thread::hardware_concurrency());
     app.run();
 }

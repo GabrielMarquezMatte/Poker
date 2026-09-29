@@ -125,7 +125,6 @@ static inline constexpr void play_all_check_call(Game &g, TRng &rng)
     }
 }
 
-// ========== Basic Setup Tests ==========
 
 TEST(GameSetup, PostsBlindsCorrectly)
 {
@@ -164,7 +163,6 @@ TEST(GameSetup, ChipsConservedAfterBlinds)
     EXPECT_EQ(total_before, total_after);
 }
 
-// ========== Fold Logic Tests ==========
 
 TEST(FoldLogic, AllFoldToOneWinner)
 {
@@ -204,7 +202,6 @@ TEST(FoldLogic, FoldReturnsCorrectValue)
     EXPECT_EQ(g.state(), GameState::Finished);
 }
 
-// ========== Check/Call Logic Tests ==========
 
 TEST(CheckCallLogic, CheckWhenNoBet)
 {
@@ -240,7 +237,6 @@ TEST(CheckCallLogic, CallMatchesBet)
     EXPECT_EQ(g.betData().pot, pot_before + call_amount);
 }
 
-// ========== Bet/Raise Logic Tests ==========
 
 TEST(BetRaiseLogic, BetSetsCurrentBet)
 {
@@ -282,7 +278,6 @@ TEST(BetRaiseLogic, MinRaiseEnforced)
     EXPECT_GE(g.betData().currentBet, blinds.bigBlind + blinds.bigBlind);
 }
 
-// ========== All-In Logic Tests ==========
 
 TEST(AllInLogic, AllInCommitsAllChips)
 {
@@ -301,7 +296,7 @@ TEST(AllInLogic, ShortStackAllInDoesNotReopenAction)
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(3, 10000, blinds);
-    g.addPlayer(50); // Short stack player
+    g.addPlayer(50); 
     g.startNewHand(rng);
 
     while (g.state() == GameState::PreFlop)
@@ -312,7 +307,6 @@ TEST(AllInLogic, ShortStackAllInDoesNotReopenAction)
     EXPECT_EQ(g.state(), GameState::Flop);
 }
 
-// ========== Street Progression Tests ==========
 
 TEST(StreetProgression, ProgressesThroughAllStreets)
 {
@@ -389,7 +383,6 @@ TEST(StreetProgression, RiverDealsOneCard)
     }
 }
 
-// ========== Chip Conservation Tests ==========
 
 TEST(ChipConservation, ChipsConservedThroughEntireHand)
 {
@@ -439,7 +432,6 @@ TEST(ChipConservation, ChipsConservedWithBetting)
     EXPECT_EQ(initial_total, final_total);
 }
 
-// ========== Pot Manager Tests (Compile-time) ==========
 
 static constexpr Player makePlayer(std::size_t id, std::uint32_t chips, std::uint32_t invested, bool folded = false, bool hasHole = true)
 {
@@ -525,7 +517,6 @@ TEST(PotManagerTest, TotalEqualsInvestments)
     }());
 }
 
-// ========== Edge Cases ==========
 
 TEST(EdgeCases, HeadsUpBlinds)
 {
@@ -583,18 +574,14 @@ TEST(EdgeCases, FinishedGameReturnsTrue)
     EXPECT_TRUE(result);
 }
 
-// ========== Bug Fix Tests ==========
 
 TEST(BugFix_CheckReject, CheckFacingBetReturnsFalse)
 {
-    // Bug: Check silently committed chips when facing a bet.
-    // Fixed: returns false immediately without touching game state.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(3, 10000, blinds);
     g.startNewHand(rng);
 
-    // On PreFlop the first actor (UTG) faces the big blind.
     const Player &actor = g.currentPlayer();
     ASSERT_GT(g.betData().currentBet, actor.committed)
         << "Pre-condition: actor must be facing a live bet";
@@ -618,13 +605,11 @@ TEST(BugFix_CheckReject, CheckFacingBetReturnsFalse)
 
 TEST(BugFix_CheckReject, CheckAfterCallingIsLegal)
 {
-    // Sanity check: after everyone calls to even the bet, Check is legal.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(3, 10000, blinds);
     g.startNewHand(rng);
 
-    // Advance past PreFlop so all committed amounts are reset.
     while (g.state() == GameState::PreFlop)
     {
         g.applyAction(rng, {ActionType::Call, 0});
@@ -634,7 +619,6 @@ TEST(BugFix_CheckReject, CheckAfterCallingIsLegal)
         GTEST_SKIP() << "Hand finished before Flop";
     }
 
-    // Now currentBet == 0, so Check is legal.
     ASSERT_EQ(g.betData().currentBet, 0u);
     const std::uint32_t pot_before = g.betData().pot;
     g.applyAction(rng, {ActionType::Check, 0});
@@ -643,15 +627,11 @@ TEST(BugFix_CheckReject, CheckAfterCallingIsLegal)
 
 TEST(BugFix_RiverCompletion, LastRiverActionReturnsTrueDirectly)
 {
-    // Bug: River set state=Showdown and returned false, forcing a spurious
-    // extra applyAction call before the showdown ran.
-    // Fixed: showdownAndPayout() is invoked directly; last River action returns true.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(2, 10000, blinds);
     g.startNewHand(rng);
 
-    // Play through PreFlop, Flop, and Turn.
     while (g.state() != GameState::River && g.state() != GameState::Finished)
     {
         const Player &p = g.currentPlayer();
@@ -666,7 +646,6 @@ TEST(BugFix_RiverCompletion, LastRiverActionReturnsTrueDirectly)
         GTEST_SKIP() << "Hand finished before River";
     }
 
-    // Play River actions. The last one must return true in the same call.
     bool finished_on_action = false;
     while (g.state() == GameState::River)
     {
@@ -688,7 +667,6 @@ TEST(BugFix_RiverCompletion, LastRiverActionReturnsTrueDirectly)
         << "showdownAndPayout must clear the pot";
 }
 
-// ========== Showdown Payout Tests ==========
 
 TEST(ShowdownPayout, PotIsZeroAfterShowdown)
 {
@@ -704,7 +682,6 @@ TEST(ShowdownPayout, PotIsZeroAfterShowdown)
 
 TEST(ShowdownPayout, TotalChipsPreservedAfterShowdown)
 {
-    // Chips must be conserved when a real showdown (not a fold) decides the winner.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{7};
     auto g = make_game(4, 5000, blinds);
@@ -718,38 +695,30 @@ TEST(ShowdownPayout, TotalChipsPreservedAfterShowdown)
 
 TEST(ShowdownPayout, WinnerChipsIncrease)
 {
-    // At least one player must end up with more chips than they had at hand start.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(2, 10000, blinds);
 
-    // Snapshot chips right before the hand (players start equal).
     g.startNewHand(rng);
     const std::uint32_t chips_sb = g.players()[0].chips + g.players()[0].committed;
     const std::uint32_t chips_bb = g.players()[1].chips + g.players()[1].committed;
 
     play_all_check_call(g, rng);
 
-    // After showdown, one (or both in a tie) player has gained chips from the pot.
     const bool someone_gained =
         (g.players()[0].chips > chips_sb) || (g.players()[1].chips > chips_bb);
     EXPECT_TRUE(someone_gained) << "At least one player must gain chips from the pot";
 }
 
-// ========== All-In Fast-Forward Tests ==========
 
 TEST(AllInFastForward, BothPlayersAllInCompletesGame)
 {
-    // When all players go all-in the board must be dealt automatically and the
-    // game must reach Finished without any further player decisions.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(2, 400, blinds);
     const int initial_total = sum_chips(g.players());
     g.startNewHand(rng);
 
-    // Drive applyAction until Finished; the AllIn action is ignored on
-    // street-transition calls where current == n.
     while (g.state() != GameState::Finished)
     {
         g.applyAction(rng, {ActionType::AllIn, 0});
@@ -762,15 +731,12 @@ TEST(AllInFastForward, BothPlayersAllInCompletesGame)
 
 TEST(AllInFastForward, ShortStackForcedAllInSidePotChipsConserved)
 {
-    // A player too short to cover the big blind is forced all-in on the blind.
-    // This creates a side pot between the two full-stacked players.
-    // Verifies that the multi-pot payout conserves total chips end-to-end.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{13};
     Game g(Blinds{50, 100});
     g.addPlayer(10000);
     g.addPlayer(10000);
-    g.addPlayer(60); // covers only part of the big blind — forced all-in
+    g.addPlayer(60); 
     const int initial_total = sum_chips(g.players());
     g.startNewHand(rng);
     play_all_check_call(g, rng);
@@ -782,7 +748,6 @@ TEST(AllInFastForward, ShortStackForcedAllInSidePotChipsConserved)
 
 TEST(AllInFastForward, ThreeWayAllInChipsConserved)
 {
-    // All three players shove on PreFlop — no player actions on later streets.
     constexpr Blinds blinds{50, 100};
     omp::XoroShiro128Plus rng{99};
     auto g = make_game(3, 500, blinds);
@@ -799,15 +764,12 @@ TEST(AllInFastForward, ThreeWayAllInChipsConserved)
     EXPECT_EQ(sum_chips(g.players()), initial_total);
 }
 
-// ========== Engine Bug Regression Tests ==========
 
 TEST(BugFix_RaiseOverStack, RaiseIsCappedAtStack)
 {
-    // Bug: commit() capped the payment at the stack, but currentBet took the full
-    // requested amount, leaving a phantom bet nobody had made.
     omp::XoroShiro128Plus rng{42};
     Game g(Blinds{50, 100});
-    g.addPlayer(300); // dealer, first to act 3-handed
+    g.addPlayer(300); 
     g.addPlayer(10000);
     g.addPlayer(10000);
     g.startNewHand(rng);
@@ -822,8 +784,6 @@ TEST(BugFix_RaiseOverStack, RaiseIsCappedAtStack)
 
 TEST(BugFix_StaleActor, ActionOnIneligibleCurrentGoesToNextPlayer)
 {
-    // Bug: the actor reference was bound before skipping an ineligible player,
-    // so the action was applied to the skipped player.
     omp::XoroShiro128Plus rng{42};
     auto g = make_game(3, 10000, Blinds{50, 100});
     g.startNewHand(rng);
@@ -839,7 +799,6 @@ TEST(BugFix_StaleActor, ActionOnIneligibleCurrentGoesToNextPlayer)
 
 TEST(BugFix_UncontestedLayer, PotManagerRefundsLayerWithoutLivePlayers)
 {
-    // Bug: a pot layer funded only by folded players had no eligible player and was dropped.
     static_assert([]() {
         std::vector<Player> players = {
             makePlayer(0, 9000, 1000, true),
@@ -855,8 +814,6 @@ TEST(BugFix_UncontestedLayer, PotManagerRefundsLayerWithoutLivePlayers)
 
 TEST(BugFix_UncontestedLayer, FoldingOverAllInsConservesChips)
 {
-    // A raises, both short stacks call all-in for less, then A folds on the flop.
-    // A's uncalled 500 must come back to A instead of vanishing.
     omp::XoroShiro128Plus rng{42};
     Game g(Blinds{50, 100});
     g.addPlayer(10000);

@@ -1,5 +1,3 @@
-// Regenerates include/preflop_table.hpp:
-//   Poker_PreflopTable <output path> [simulations per entry]
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -22,14 +20,13 @@ int main(int argc, char **argv)
     {
         for (std::size_t index = 0; index < classes; ++index)
         {
-            // Representative hole cards for the class (bit = suit * 13 + rank); see preflopClassIndex.
             const std::size_t row = index / 13;
             const std::size_t col = index % 13;
-            const std::size_t secondSuit = row > col ? 0 : 1; // suited only above the diagonal
+            const std::size_t secondSuit = row > col ? 0 : 1; 
             const Deck hole = Deck::from_mask((1ull << row) | (1ull << (secondSuit * 13 + col)));
             results.push_back(pool.submit_task([=]()
                                                {
-                omp::XoroShiro128Plus rng(players * classes + index); // fixed seed: reproducible table
+                omp::XoroShiro128Plus rng(players * classes + index); 
                 return computeRandomGameStatistics(rng, hole, Deck::emptyDeck(), simulations, players); }));
         }
     }
@@ -41,7 +38,7 @@ int main(int argc, char **argv)
         << "#define __POKER_PREFLOP_TABLE_HPP__\n"
         << "#include <array>\n"
         << "#include <cstdint>\n"
-        << "struct PreflopEntry\n{\n    std::uint32_t wins;\n    std::uint32_t ties;\n    std::uint32_t losses;\n};\n"
+        << "struct PreflopEntry\n{\n    std::uint32_t wins;\n    std::uint32_t ties;\n    std::uint32_t losses;\n    std::uint64_t potShares;\n};\n"
         << "// [numPlayers - 2][preflopClassIndex]; all zero means \"not generated\".\n"
         << "inline constexpr std::array<std::array<PreflopEntry, 169>, " << playerCounts << "> preflopTable{{\n";
     for (std::size_t p = 0; p < playerCounts; ++p)
@@ -50,7 +47,7 @@ int main(int argc, char **argv)
         for (std::size_t index = 0; index < classes; ++index)
         {
             const GameStatistics stats = results[p * classes + index].get();
-            out << "        {" << stats.wins << ", " << stats.ties << ", " << stats.losses << "},\n";
+            out << "        {" << stats.wins << ", " << stats.ties << ", " << stats.losses << ", " << stats.potShares << "},\n";
         }
         out << "    }},\n";
         std::cerr << "players " << p + 2 << " done\n";

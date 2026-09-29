@@ -5,6 +5,7 @@
 #include "deck.hpp"
 #include "preflop_table.hpp"
 #include <BS_thread_pool.hpp>
+#include <optional>
 #include <span>
 #include <thread>
 enum class GameResult : std::uint8_t
@@ -35,8 +36,8 @@ inline constexpr GameResult compareHands(const Deck playerCards, const Deck tabl
     }
     return GameResult::Win;
 }
-template<typename TRng>
-inline constexpr GameResult compareRandomHands(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers) noexcept
+template <typename TRng>
+inline constexpr std::size_t playRandomShowdown(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers) noexcept
 {
     std::size_t numCardsToDeal = 5 - tableCards.size();
     if (numCardsToDeal)
@@ -44,25 +45,18 @@ inline constexpr GameResult compareRandomHands(TRng &rng, const Deck playerCards
         tableCards.addCards(deck.popRandomCards(rng, numCardsToDeal));
     }
     ClassificationResult playerResult = Hand::classify(Deck::createDeck({playerCards, tableCards}));
-    bool sawTie = false;
+    std::size_t winners = 1;
     for (std::size_t i = 0; i < numPlayers - 1; ++i)
     {
         Deck opponent = deck.popPair(rng);
         ClassificationResult opponentResult = Hand::classify(Deck::createDeck({opponent, tableCards}));
         if (opponentResult > playerResult)
         {
-            return GameResult::Lose;
+            return 0;
         }
-        if (opponentResult == playerResult)
-        {
-            sawTie = true;
-        }
+        winners += opponentResult == playerResult;
     }
-    if (sawTie)
-    {
-        return GameResult::Tie;
-    }
-    return GameResult::Win;
+    return winners;
 }
 template <typename TRng>
 inline bool playerWinsRandomGame(TRng &rng, const Deck playerCards, Deck tableCards, Deck deck, std::size_t numPlayers)
@@ -102,33 +96,39 @@ inline constexpr double probabilityOfWinning(TRng &rng, const Deck playerCards, 
 }
 struct GameStatistics
 {
+    static constexpr std::uint64_t fullPot = 2520;
     std::size_t wins = 0;
     std::size_t losses = 0;
     std::size_t ties = 0;
+    std::uint64_t potShares = 0;
     inline constexpr std::size_t totalGames() const noexcept
     {
         return wins + losses + ties;
     }
-    inline constexpr void add(GameResult result) noexcept
+    inline constexpr double notLosing() const noexcept
     {
-        switch (result)
+        return static_cast<double>(wins + ties) / static_cast<double>(totalGames());
+    }
+    inline constexpr double equity() const noexcept
+    {
+        return static_cast<double>(potShares) / static_cast<double>(fullPot * totalGames());
+    }
+    inline constexpr void record(std::size_t winners) noexcept
+    {
+        if (winners == 0)
         {
-        case GameResult::Win:
-            ++wins;
-            break;
-        case GameResult::Lose:
             ++losses;
-            break;
-        case GameResult::Tie:
-            ++ties;
-            break;
+            return;
         }
+        ++(winners == 1 ? wins : ties);
+        potShares += fullPot / winners;
     }
     inline constexpr GameStatistics &operator+=(const GameStatistics &other) noexcept
     {
         wins += other.wins;
         losses += other.losses;
         ties += other.ties;
+        potShares += other.potShares;
         return *this;
     }
 };
@@ -141,12 +141,11 @@ inline GameStatistics computeRandomGameStatistics(TRng &rng, const Deck playerCa
     deck.removeCards(tableCards);
     for (std::size_t i = 0; i < numSimulations; ++i)
     {
-        stats.add(compareRandomHands(rng, playerCards, tableCards, deck, numPlayers));
+        stats.record(playRandomShowdown(rng, playerCards, tableCards, deck, numPlayers));
     }
     return stats;
 }
 
-// Ordered ways to deal the missing board cards and then `opponents` hole pairs from `deckSize` cards.
 inline constexpr double exactDealCount(std::size_t deckSize, std::size_t boardMissing, std::size_t opponents) noexcept
 {
     double ways = 1;
@@ -162,7 +161,6 @@ inline constexpr double exactDealCount(std::size_t deckSize, std::size_t boardMi
     return ways;
 }
 
-// Calls f(subset) for every k-card subset of `cards`.
 template <typename F>
 inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std::uint64_t chosen, F &&f)
 {
@@ -178,40 +176,79 @@ inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std
     }
 }
 
-inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, bool sawTie, GameStatistics &stats)
+inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats);
+
+inline constexpr void dealOpponent(std::uint64_t deck, std::uint64_t hole, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats)
+{
+    const ClassificationResult result = Hand::classify(Deck::from_mask(hole | board));
+    if (result > player)
+    {
+        stats.losses += static_cast<std::size_t>(exactDealCount(static_cast<std::size_t>(std::popcount(deck)) - 2, 0, opponents - 1));
+        return;
+    }
+    enumerateOpponents(deck & ~hole, board, player, opponents - 1, winners + (result == player), stats);
+}
+
+inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats)
 {
     if (opponents == 0)
     {
-        ++(sawTie ? stats.ties : stats.wins);
+        stats.record(winners);
         return;
     }
-    // A loss is decided as soon as one opponent wins; count every deal of the remaining opponents at once.
-    const auto remainingDeals = static_cast<std::size_t>(exactDealCount(static_cast<std::size_t>(std::popcount(deck)) - 2, 0, opponents - 1));
     forEachCombination(deck, 2, 0, [&](std::uint64_t hole)
-                       {
-        const ClassificationResult result = Hand::classify(Deck::from_mask(hole | board));
-        if (result > player)
-        {
-            stats.losses += remainingDeals;
-            return;
-        }
-        enumerateOpponents(deck & ~hole, board, player, opponents - 1, sawTie || result == player, stats); });
+                       { dealOpponent(deck, hole, board, player, opponents, winners, stats); });
 }
 
-// Every possible deal counted once (opponents in seat order), so the ratios are exact.
-inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers)
+inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers, std::size_t part = 0, std::size_t parts = 1)
 {
     GameStatistics stats;
     const std::uint64_t deck = Deck::createFullDeck().getMask() & ~playerCards.getMask() & ~tableCards.getMask();
-    forEachCombination(deck, 5 - tableCards.size(), 0, [&](std::uint64_t boardRest)
+    const std::size_t boardMissing = 5 - tableCards.size();
+    const bool splitBoards = exactDealCount(static_cast<std::size_t>(std::popcount(deck)), boardMissing, 0) >= 4.0 * static_cast<double>(parts);
+    std::size_t owner = 0;
+    const auto mine = [&]()
+    {
+        const bool result = owner == part;
+        owner = owner + 1 == parts ? 0 : owner + 1;
+        return result;
+    };
+    forEachCombination(deck, boardMissing, 0, [&](std::uint64_t boardRest)
                        {
+        if (splitBoards && !mine())
+        {
+            return;
+        }
         const std::uint64_t board = tableCards.getMask() | boardRest;
+        const std::uint64_t rest = deck & ~boardRest;
         const ClassificationResult player = Hand::classify(Deck::from_mask(playerCards.getMask() | board));
-        enumerateOpponents(deck & ~boardRest, board, player, numPlayers - 1, false, stats); });
+        forEachCombination(rest, 2, 0, [&](std::uint64_t hole)
+                           {
+            if (splitBoards || mine())
+            {
+                dealOpponent(rest, hole, board, player, numPlayers - 1, 1, stats);
+            } }); });
     return stats;
 }
 
-// 13x13 grid of starting hands: pairs on the diagonal, suited hands at [high][low], offsuit at [low][high].
+inline GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+{
+    const std::size_t parts = threadPool.get_thread_count();
+    std::vector<std::future<GameStatistics>> results;
+    results.reserve(parts);
+    for (std::size_t part = 0; part < parts; ++part)
+    {
+        results.push_back(threadPool.submit_task([=]()
+                                                 { return exactGameStatistics(playerCards, tableCards, numPlayers, part, parts); }));
+    }
+    GameStatistics stats;
+    for (auto &result : results)
+    {
+        stats += result.get();
+    }
+    return stats;
+}
+
 inline constexpr std::size_t preflopClassIndex(const Deck holeCards) noexcept
 {
     const std::uint64_t mask = holeCards.getMask();
@@ -223,7 +260,6 @@ inline constexpr std::size_t preflopClassIndex(const Deck holeCards) noexcept
     return static_cast<std::size_t>(suited ? high * 13 + low : low * 13 + high);
 }
 
-// Precomputed preflop statistics against random opponents; empty if the table has no entry.
 inline constexpr GameStatistics preflopStatistics(const Deck holeCards, std::size_t numPlayers) noexcept
 {
     if (holeCards.size() != 2 || numPlayers < 2 || numPlayers > preflopTable.size() + 1)
@@ -231,10 +267,9 @@ inline constexpr GameStatistics preflopStatistics(const Deck holeCards, std::siz
         return {};
     }
     const PreflopEntry entry = preflopTable[numPlayers - 2][preflopClassIndex(holeCards)];
-    return {entry.wins, entry.losses, entry.ties};
+    return {entry.wins, entry.losses, entry.ties, entry.potShares};
 }
 
-// Monte Carlo only, split across the pool.
 inline GameStatistics simulateGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
     const std::size_t numThreads = threadPool.get_thread_count();
@@ -258,10 +293,19 @@ inline GameStatistics simulateGameStatistics(const Deck playerCards, const Deck 
     return stats;
 }
 
-// Cheapest source that is at least as accurate as numSimulations samples:
-// preflop table, then exact enumeration, then simulation.
-inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+inline constexpr bool preferExact(double deals, std::size_t numSimulations) noexcept
 {
+    return deals <= 1.5 * static_cast<double>(numSimulations);
+}
+
+inline constexpr double exactDealCount(const Deck playerCards, const Deck tableCards, std::size_t numPlayers) noexcept
+{
+    return exactDealCount(52 - playerCards.size() - tableCards.size(), 5 - tableCards.size(), numPlayers - 1);
+}
+
+inline std::optional<GameStatistics> quickGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
+{
+    constexpr double inlineWork = 50'000;
     if (tableCards.size() == 0)
     {
         const GameStatistics stats = preflopStatistics(playerCards, numPlayers);
@@ -270,20 +314,38 @@ inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const 
             return stats;
         }
     }
-    const std::size_t numThreads = threadPool.get_thread_count();
-    // Enumeration is exact and, up to this size, no slower than the parallel simulation.
-    const std::size_t deckSize = 52 - playerCards.size() - tableCards.size();
-    if (exactDealCount(deckSize, 5 - tableCards.size(), numPlayers - 1) <= static_cast<double>(numSimulations / numThreads))
+    const double deals = exactDealCount(playerCards, tableCards, numPlayers);
+    if (preferExact(deals, numSimulations))
     {
-        return exactGameStatistics(playerCards, tableCards, numPlayers);
+        if (deals <= inlineWork)
+        {
+            return exactGameStatistics(playerCards, tableCards, numPlayers);
+        }
+        return std::nullopt;
+    }
+    if (static_cast<double>(numSimulations) <= inlineWork)
+    {
+        omp::XoroShiro128Plus rng(std::random_device{}());
+        return computeRandomGameStatistics(rng, playerCards, tableCards, numSimulations, numPlayers);
+    }
+    return std::nullopt;
+}
+
+inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+{
+    if (const auto quick = quickGameStatistics(playerCards, tableCards, numSimulations, numPlayers))
+    {
+        return *quick;
+    }
+    if (preferExact(exactDealCount(playerCards, tableCards, numPlayers), numSimulations))
+    {
+        return exactGameStatistics(playerCards, tableCards, numPlayers, threadPool);
     }
     return simulateGameStatistics(playerCards, tableCards, numSimulations, numPlayers, threadPool);
 }
 
-// Probability of not losing: ties count as wins.
 inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
-    const GameStatistics stats = computeRandomGameStatistics(playerCards, tableCards, numSimulations, numPlayers, threadPool);
-    return static_cast<double>(stats.wins + stats.ties) / static_cast<double>(stats.totalGames());
+    return computeRandomGameStatistics(playerCards, tableCards, numSimulations, numPlayers, threadPool).notLosing();
 }
 #endif // __POKER_GAME_HPP__

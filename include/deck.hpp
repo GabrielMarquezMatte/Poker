@@ -103,7 +103,6 @@ public:
     }
     static inline constexpr Deck parseHand(const std::string_view str) noexcept
     {
-        // Split from spaces
         std::uint64_t mask = 0;
         std::size_t start = 0;
         std::size_t end = str.find(' ', start);

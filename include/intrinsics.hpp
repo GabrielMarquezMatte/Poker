@@ -38,7 +38,6 @@ inline constexpr std::uint16_t keepTopBits(std::uint16_t m, int keep) noexcept
 {
     int n = std::popcount(m);
     
-    // Fast paths for edge cases
     if (keep >= n) return m;
     if (keep <= 0) return 0;
     

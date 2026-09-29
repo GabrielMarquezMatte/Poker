@@ -2,7 +2,6 @@
 #include "../include/game.hpp"
 
 // ============================================================================
-// Deck Creation and Card Operations
 // ============================================================================
 
 static void BM_CreateRandom7Cards(benchmark::State &state)
@@ -112,9 +111,6 @@ static void BM_ParseHand(benchmark::State &state)
 }
 BENCHMARK(BM_ParseHand);
 
-// ============================================================================
-// Hand Classification Benchmarks
-// ============================================================================
 
 static void BM_Classification(benchmark::State &state)
 {
@@ -252,9 +248,6 @@ static void BM_ClassifyHighCard(benchmark::State &state)
 }
 BENCHMARK(BM_ClassifyHighCard);
 
-// ============================================================================
-// Hand Comparison Benchmarks
-// ============================================================================
 
 static void BM_CompareHands(benchmark::State &state)
 {
@@ -288,9 +281,6 @@ static void BM_CompareHandsMultipleOpponents(benchmark::State &state)
 }
 BENCHMARK(BM_CompareHandsMultipleOpponents);
 
-// ============================================================================
-// Game Simulation Benchmarks
-// ============================================================================
 
 static void BM_PlayerWinsRandomGame(benchmark::State &st)
 {
@@ -316,7 +306,7 @@ static void BM_PlayerWinsRandomGamePreflop(benchmark::State &st)
     omp::XoroShiro128Plus rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
     Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = Deck::emptyDeck(); // No community cards yet
+    Deck tableCards = Deck::emptyDeck(); 
     std::size_t numPlayers = st.range(0);
     Deck deckForGame = Deck::createFullDeck();
     deckForGame.removeCards(playerCards);
@@ -333,7 +323,7 @@ static void BM_PlayerWinsRandomGameFlop(benchmark::State &st)
     omp::XoroShiro128Plus rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
     Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = deck.popRandomCards(rng, 3); // Flop only
+    Deck tableCards = deck.popRandomCards(rng, 3); 
     std::size_t numPlayers = st.range(0);
     Deck deckForGame = Deck::createFullDeck();
     deckForGame.removeCards(playerCards);
@@ -351,7 +341,7 @@ static void BM_PlayerWinsRandomGameTurn(benchmark::State &st)
     omp::XoroShiro128Plus rng(st.thread_index() + st.iterations());
     Deck deck = Deck::createFullDeck();
     Deck playerCards = deck.popRandomCards(rng, 2);
-    Deck tableCards = deck.popRandomCards(rng, 4); // Flop + Turn
+    Deck tableCards = deck.popRandomCards(rng, 4); 
     std::size_t numPlayers = st.range(0);
     Deck deckForGame = Deck::createFullDeck();
     deckForGame.removeCards(playerCards);
@@ -364,9 +354,6 @@ static void BM_PlayerWinsRandomGameTurn(benchmark::State &st)
 }
 BENCHMARK(BM_PlayerWinsRandomGameTurn)->DenseRange(2, 10, 1);
 
-// ============================================================================
-// Probability of Winning Benchmarks (Sequential)
-// ============================================================================
 
 static void BM_ProbabilityOfWinningSequential(benchmark::State &st)
 {
@@ -401,9 +388,6 @@ static void BM_ProbabilityOfWinningPreflop(benchmark::State &st)
 }
 BENCHMARK(BM_ProbabilityOfWinningPreflop)->DenseRange(2, 10, 1)->Unit(benchmark::kMillisecond);
 
-// ============================================================================
-// Probability of Winning Benchmarks (Parallel)
-// ============================================================================
 
 static void BM_ProbabilityOfWinningParallel(benchmark::State &st)
 {
@@ -423,8 +407,6 @@ static void BM_ProbabilityOfWinningParallel(benchmark::State &st)
 }
 BENCHMARK(BM_ProbabilityOfWinningParallel)->Ranges({{2, 8}, {10'000, 1'000'000}})->Unit(benchmark::kMillisecond);
 
-// API path preflop: answered from the precomputed table when it is at least as accurate
-// as the requested simulations; arg 1 = 0 forces the parallel simulation for comparison.
 static void BM_ProbabilityOfWinningPreflopApi(benchmark::State &st)
 {
     const Deck playerCards = Deck::parseHand("Kh Qd");
@@ -438,6 +420,21 @@ static void BM_ProbabilityOfWinningPreflopApi(benchmark::State &st)
         benchmark::DoNotOptimize(stats);
     }
 }
+static void BM_ExactVsSimulated(benchmark::State &st)
+{
+    const Deck playerCards = Deck::parseHand("Ah Kd");
+    const Deck tableCards = Deck::parseHand("Kc 7s 2h");
+    BS::thread_pool<BS::tp::none> threadPool(std::thread::hardware_concurrency());
+    for (auto _ : st)
+    {
+        GameStatistics stats = st.range(0)
+                                   ? simulateGameStatistics(playerCards, tableCards, 1'000'000, 2, threadPool)
+                                   : exactGameStatistics(playerCards, tableCards, 2, threadPool);
+        benchmark::DoNotOptimize(stats);
+    }
+}
+BENCHMARK(BM_ExactVsSimulated)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
+
 BENCHMARK(BM_ProbabilityOfWinningPreflopApi)->ArgsProduct({{2, 6, 10}, {0, 1}})->Unit(benchmark::kMicrosecond);
 
 static void BM_ProbabilityOfWinningParallelScaling(benchmark::State &st)
@@ -460,9 +457,6 @@ static void BM_ProbabilityOfWinningParallelScaling(benchmark::State &st)
 }
 BENCHMARK(BM_ProbabilityOfWinningParallelScaling)->DenseRange(1, 16, 1)->Unit(benchmark::kMillisecond);
 
-// ============================================================================
-// Throughput Benchmarks
-// ============================================================================
 
 static void BM_ClassificationThroughput(benchmark::State &state)
 {
@@ -488,8 +482,6 @@ static void BM_ClassificationThroughput(benchmark::State &state)
 }
 BENCHMARK(BM_ClassificationThroughput);
 
-// Same as above, but with far more distinct hands than the branch predictor can memorize,
-// so branch costs match a real simulation.
 static void BM_ClassificationRandomThroughput(benchmark::State &state)
 {
     omp::XoroShiro128Plus rng(42);

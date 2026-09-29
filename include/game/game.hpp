@@ -91,7 +91,7 @@ private:
     inline constexpr void resetBettingRound() noexcept
     {
         m_betData.currentBet = 0;
-        m_betData.minRaise = m_blinds.bigBlind; // usual convention
+        m_betData.minRaise = m_blinds.bigBlind; 
         m_playersData.lastAggressor = numberOfPlayers();
         for (auto &p : m_players)
         {
@@ -158,7 +158,6 @@ private:
     inline constexpr void showdownAndPayout() noexcept
     {
         const std::size_t n = numberOfPlayers();
-        // Folded players keep the zero result, so refund pots (only folded contributors) split evenly.
         std::vector<ClassificationResult> hands(n, ClassificationResult{});
         for (std::size_t i = 0; i < n; ++i)
         {
@@ -290,7 +289,6 @@ public:
         {
             m_playersData.dealer = nextAliveFrom(m_playersData.dealer);
         }
-        // Heads-up the dealer posts the small blind.
         const std::size_t sb = countAlive() == 2 ? m_playersData.dealer : nextAliveFrom(m_playersData.dealer);
         const std::size_t bb = nextAliveFrom(sb);
         commit(m_players[sb], m_blinds.smallBlind);
@@ -358,7 +356,7 @@ public:
         {
             if (toCall != 0)
             {
-                return false; // illegal: cannot check when facing a bet
+                return false; 
             }
             return advanceAndCheckComplete(rng);
         }
@@ -369,7 +367,6 @@ public:
             return advanceAndCheckComplete(rng);
         }
 
-        // With currentBet == 0 a bet and a raise follow the same rules.
         case ActionType::Bet:
         case ActionType::Raise:
         case ActionType::AllIn:
@@ -381,13 +378,13 @@ public:
             commit(current, target - current.committed);
             if (target <= m_betData.currentBet)
             {
-                return advanceAndCheckComplete(rng); // all-in for no more than a call
+                return advanceAndCheckComplete(rng); 
             }
             const std::uint32_t raiseSize = target - m_betData.currentBet;
             m_betData.currentBet = target;
             if (raiseSize >= m_betData.minRaise)
             {
-                m_betData.minRaise = raiseSize; // a short all-in does not lower the min raise
+                m_betData.minRaise = raiseSize; 
             }
             m_playersData.lastAggressor = m_playersData.current;
             m_playersData.toAct = countEligibleExcluding(m_playersData.current);

@@ -10,7 +10,6 @@
 struct Hand
 {
 private:
-    // Returns the highest set bit of x as a bitmask. x must be nonzero.
     static inline constexpr std::uint16_t highBit(std::uint16_t x) noexcept
     {
         return std::uint16_t(1) << (std::bit_width(x) - 1);
@@ -79,7 +78,6 @@ public:
         const std::uint16_t flushMask = getFlush(suits);
         const std::uint16_t straightVal = straightTable[anySuit];
 
-        // Rank masks by multiplicity: quads (4 suits), three (>= 3), two (>= 2).
         const std::uint16_t p01 = suits.s0 & suits.s1;
         const std::uint16_t p23 = suits.s2 & suits.s3;
         const std::uint16_t quads = p01 & p23;
@@ -88,7 +86,6 @@ public:
         const std::uint16_t pairsOnly = two & ~three;
         const bool fullHouse = (three != 0) & ((static_cast<std::uint16_t>(three & (three - 1u)) | pairsOnly) != 0);
 
-        // Rare categories: branches are almost never taken, so they predict well.
         if (flushMask) [[unlikely]]
         {
             const std::uint16_t straightValFlush = straightTable[flushMask];
@@ -119,9 +116,6 @@ public:
             return {Classification::Straight, straightVal};
         }
 
-        // HighCard / Pair / TwoPair / ThreeOfAKind (~90% of hands) share one branch-free path:
-        // which of them it is changes from hand to hand, so branching on it mispredicts a lot.
-        // Here `three` has at most one bit and pairsOnly is empty when it does.
         const std::uint16_t lowestPair = pairsOnly & (~pairsOnly + 1u);
         const std::uint16_t topPairs = pairsOnly ^ (std::popcount(pairsOnly) > 2 ? lowestPair : 0);
         const bool isTrips = three != 0;
