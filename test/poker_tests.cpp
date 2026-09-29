@@ -62,9 +62,7 @@ TEST(DeckTest, ClassifyFullHouse)
                                                    Card(Suit::Hearts, Rank::King),
                                                    Card(Suit::Diamonds, Rank::King)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    // FullHouse rank field is index-encoded: (trips_rank_idx << 4) | pair_rank_idx
-    // Ace=12, King=11 → (12<<4)|11 = 203
-    static_assert(result == ClassificationResult(Classification::FullHouse, static_cast<Rank>((12 << 4) | 11)), "Expected Full House classification");
+    static_assert(result == ClassificationResult(Classification::FullHouse, Rank::Ace, Rank::King), "Expected Full House classification");
 }
 TEST(DeckTest, ClassifyFourOfAKind)
 {
@@ -74,7 +72,7 @@ TEST(DeckTest, ClassifyFourOfAKind)
                                                    Card(Suit::Spades, Rank::Ace),
                                                    Card(Suit::Hearts, Rank::King)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::FourOfAKind, Rank::Ace | Rank::King), "Expected Four of a Kind classification");
+    static_assert(result == ClassificationResult(Classification::FourOfAKind, Rank::Ace, Rank::King), "Expected Four of a Kind classification");
 }
 TEST(DeckTest, ClassifyThreeOfAKind)
 {
@@ -84,7 +82,7 @@ TEST(DeckTest, ClassifyThreeOfAKind)
                                                    Card(Suit::Hearts, Rank::King),
                                                    Card(Suit::Diamonds, Rank::Queen)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::ThreeOfAKind, Rank::Ace | Rank::King | Rank::Queen), "Expected Three of a Kind classification");
+    static_assert(result == ClassificationResult(Classification::ThreeOfAKind, Rank::Ace, Rank::King | Rank::Queen), "Expected Three of a Kind classification");
 }
 TEST(DeckTest, ClassifyTwoPair)
 {
@@ -94,7 +92,7 @@ TEST(DeckTest, ClassifyTwoPair)
                                                    Card(Suit::Hearts, Rank::King),
                                                    Card(Suit::Diamonds, Rank::Queen)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King | Rank::Queen), "Expected Two Pair classification");
+    static_assert(result == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King, Rank::Queen), "Expected Two Pair classification");
 }
 TEST(DeckTest, ClassifyOnePair)
 {
@@ -186,7 +184,7 @@ TEST(ClassificationTest, TestTwoPairBreakdown)
     static constexpr ClassificationResult res4 = Hand::classify(Deck::createDeck({fourthOpponent, board}));
     static constexpr ClassificationResult res5 = Hand::classify(Deck::createDeck({fifthOpponent, board}));
     static constexpr ClassificationResult res6 = Hand::classify(Deck::createDeck({sixthOpponent, board}));
-    static_assert(mainClassification == res1, "Expected tie with first opponent");
+    static_assert(mainClassification < res1, "KK99Q must beat QQ99K");
     static_assert(mainClassification == res2, "Expected tie with second opponent");
     static_assert(mainClassification < res3, "Expected tie with third opponent");
     static_assert(mainClassification < res4, "Expected tie with fourth opponent");
@@ -221,8 +219,8 @@ TEST(ClassificationTest, OnePairKickerComparison)
 // 7) Two-Pair kicker comparison: AA QQ K beats AA JJ K
 TEST(ClassificationTest, TwoPairKickerComparison)
 {
-    static constexpr ClassificationResult twoPairQHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Queen | Rank::King);
-    static constexpr ClassificationResult twoPairJHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Jack | Rank::King);
+    static constexpr ClassificationResult twoPairQHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Queen, Rank::King);
+    static constexpr ClassificationResult twoPairJHigh = ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::Jack, Rank::King);
     static_assert(twoPairQHigh > twoPairJHigh, "Two Pair with Queen kicker should beat Two Pair with Jack kicker");
 }
 
@@ -404,7 +402,7 @@ TEST(EdgeCases, StaticAssert_Complex7CardHands)
 {
     // Caso: 3 Pares no Board -> Deve escolher os 2 maiores (AA, KK) com kicker Q
     static constexpr Deck threePairHand = Deck::parseHand("as ac ks kc qs qc 2h");
-    static_assert(Hand::classify(threePairHand) == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King | Rank::Queen),
+    static_assert(Hand::classify(threePairHand) == ClassificationResult(Classification::TwoPair, Rank::Ace | Rank::King, Rank::Queen),
         "FALHA DE COMPILACAO: Erro ao escolher os melhores 2 pares de 3 possiveis.");
 
     // Caso: Wheel Straight Flush com Kicker do mesmo naipe
@@ -535,4 +533,41 @@ TEST(BugFix, Flush_6Cards_WheelStraightFlushStillDetected)
         "Wheel straight flush must be detected even with a 6th suited card present");
     static_assert(result == ClassificationResult(Classification::StraightFlush, Rank::Five),
         "Must be 5-high straight flush (wheel)");
+}
+
+// Bug 5: made-hand ranks and kickers shared one 13-bit mask, so different hands collided.
+static constexpr ClassificationResult classifyWith(std::string_view board, std::string_view hole)
+{
+    return Hand::classify(Deck::createDeck({Deck::parseHand(board), Deck::parseHand(hole)}));
+}
+
+TEST(BugFix, Trips_HigherTripsWinsWithSameRankSet)
+{
+    // KKK QJ vs QQQ KJ: same rank set {K,Q,J}
+    static_assert(classifyWith("Kh Qd Jc 4s 2h", "Ks Kd") > classifyWith("Kh Qd Jc 4s 2h", "Qs Qc"));
+}
+
+TEST(BugFix, TwoPair_HigherSecondPairWinsWithSameRankSet)
+{
+    // KK QQ 5 vs KK 55 Q: same rank set {K,Q,5}
+    static_assert(classifyWith("Kh Ks 5h 5s Qd", "Qc 2d") > classifyWith("Kh Ks 5h 5s Qd", "3c 4d"));
+}
+
+TEST(BugFix, Pair_LowKickerBreaksTie)
+{
+    // 99 KQ5 vs 99 KQ4: kickers below Six used to be dropped
+    static_assert(classifyWith("9h Kd Qc 3s 2h", "9s 5d") > classifyWith("9h Kd Qc 3s 2h", "9c 4d"));
+}
+
+TEST(BugFix, Quads_HigherQuadsWinsWithSameRankSet)
+{
+    // KKKK 5 vs 5555 K: same rank set {K,5}
+    static_assert(classifyWith("Kh Kd 5h 5d 3c", "Ks Kc") > classifyWith("Kh Kd 5h 5d 3c", "5s 5c"));
+}
+
+TEST(StreamingTest, PairPrintsPairThenKickers)
+{
+    std::ostringstream oss;
+    oss << classifyWith("9h Kd Qc 3s 2h", "9s 5d");
+    EXPECT_EQ(oss.str(), "Pair: 9 + 5 Q K");
 }

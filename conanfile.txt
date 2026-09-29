@@ -1,11 +1,12 @@
 [requires]
-gtest/1.17.0
-benchmark/1.9.4
-bshoshany-thread-pool/5.0.0
-dlib/19.24.2
-ftxui/6.1.9
-drogon/1.9.12
-glaze/7.0.2
+gtest/1.18.0
+benchmark/1.9.5
+bshoshany-thread-pool/5.1.0
+drogon/1.9.13
+glaze/8.4.0
+
+[options]
+drogon/*:with_boost=False
 
 [generators]
 CMakeDeps

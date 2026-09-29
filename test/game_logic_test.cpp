@@ -798,3 +798,106 @@ TEST(AllInFastForward, ThreeWayAllInChipsConserved)
     EXPECT_EQ(g.betData().pot, 0u);
     EXPECT_EQ(sum_chips(g.players()), initial_total);
 }
+
+// ========== Engine Bug Regression Tests ==========
+
+TEST(BugFix_RaiseOverStack, RaiseIsCappedAtStack)
+{
+    // Bug: commit() capped the payment at the stack, but currentBet took the full
+    // requested amount, leaving a phantom bet nobody had made.
+    omp::XoroShiro128Plus rng{42};
+    Game g(Blinds{50, 100});
+    g.addPlayer(300); // dealer, first to act 3-handed
+    g.addPlayer(10000);
+    g.addPlayer(10000);
+    g.startNewHand(rng);
+    ASSERT_EQ(g.currentPlayer().id, 0u);
+
+    g.applyAction(rng, {ActionType::Raise, 1000});
+
+    EXPECT_TRUE(g.players()[0].all_in);
+    EXPECT_EQ(g.players()[0].committed, 300u);
+    EXPECT_EQ(g.betData().currentBet, 300u);
+}
+
+TEST(BugFix_StaleActor, ActionOnIneligibleCurrentGoesToNextPlayer)
+{
+    // Bug: the actor reference was bound before skipping an ineligible player,
+    // so the action was applied to the skipped player.
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(3, 10000, Blinds{50, 100});
+    g.startNewHand(rng);
+    const std::size_t skipped = g.currentPlayer().id;
+    g.mutablePlayers()[skipped].all_in = true;
+
+    g.applyAction(rng, {ActionType::Call, 0});
+
+    EXPECT_EQ(g.players()[skipped].committed, 0u) << "Skipped player must not act";
+    EXPECT_EQ(g.players()[skipped].chips, 10000u);
+    EXPECT_EQ(g.players()[1].committed, 100u) << "Small blind should have called";
+}
+
+TEST(BugFix_UncontestedLayer, PotManagerRefundsLayerWithoutLivePlayers)
+{
+    // Bug: a pot layer funded only by folded players had no eligible player and was dropped.
+    static_assert([]() {
+        std::vector<Player> players = {
+            makePlayer(0, 9000, 1000, true),
+            makePlayer(1, 0, 500),
+            makePlayer(2, 0, 500),
+        };
+        auto pots = PotManager::build(players);
+        return pots.size() == 2
+            && pots[0].amount == 1500 && pots[0].eligiblePlayers.size() == 2
+            && pots[1].amount == 500 && pots[1].eligiblePlayers == std::vector<std::size_t>{0};
+    }());
+}
+
+TEST(BugFix_UncontestedLayer, FoldingOverAllInsConservesChips)
+{
+    // A raises, both short stacks call all-in for less, then A folds on the flop.
+    // A's uncalled 500 must come back to A instead of vanishing.
+    omp::XoroShiro128Plus rng{42};
+    Game g(Blinds{50, 100});
+    g.addPlayer(10000);
+    g.addPlayer(500);
+    g.addPlayer(500);
+    const int initial_total = sum_chips(g.players());
+    g.startNewHand(rng);
+
+    g.applyAction(rng, {ActionType::Raise, 1000});
+    g.applyAction(rng, {ActionType::AllIn, 0});
+    g.applyAction(rng, {ActionType::AllIn, 0});
+    ASSERT_EQ(g.state(), GameState::Flop);
+    ASSERT_EQ(g.currentPlayer().id, 0u);
+    g.applyAction(rng, {ActionType::Fold, 0});
+    for (int guard = 0; g.state() != GameState::Finished && guard < 10; ++guard)
+    {
+        g.applyAction(rng, {ActionType::Check, 0});
+    }
+
+    EXPECT_EQ(g.state(), GameState::Finished);
+    EXPECT_EQ(sum_chips(g.players()), initial_total);
+    EXPECT_EQ(g.players()[0].chips, 9500u);
+}
+
+TEST(BugFix_Dealer, ButtonRotatesBetweenHands)
+{
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(3, 10000, Blinds{50, 100});
+    g.startNewHand(rng);
+    EXPECT_EQ(g.dealer(), 0u);
+    play_all_check_call(g, rng);
+    g.startNewHand(rng);
+    EXPECT_EQ(g.dealer(), 1u);
+}
+
+TEST(BugFix_Dealer, HeadsUpDealerPostsSmallBlind)
+{
+    omp::XoroShiro128Plus rng{42};
+    auto g = make_game(2, 10000, Blinds{50, 100});
+    g.startNewHand(rng);
+    EXPECT_EQ(g.players()[0].committed, 50u);
+    EXPECT_EQ(g.players()[1].committed, 100u);
+    EXPECT_EQ(g.currentPlayer().id, 0u) << "Dealer acts first preflop heads-up";
+}

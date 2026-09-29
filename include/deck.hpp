@@ -8,7 +8,7 @@
 struct Deck
 {
 private:
-    std::uint64_t m_cardsBitmask;
+    std::uint64_t m_cardsBitmask = 0;
     static constexpr std::array<Card, 52> m_deck = []()
     {
         std::array<Card, 52> deck;
@@ -48,11 +48,11 @@ public:
         }
         inline constexpr Card operator*() const noexcept
         {
-            return calculateCardFromMask(m_mask & -static_cast<std::int64_t>(m_mask));
+            return calculateCardFromMask(m_mask);
         }
         inline constexpr DeckIterator &operator++() noexcept
         {
-            m_mask &= ~(m_mask & -static_cast<std::int64_t>(m_mask));
+            m_mask &= m_mask - 1;
             return *this;
         }
     };
@@ -215,10 +215,9 @@ public:
     }
     inline constexpr Card popCard() noexcept
     {
-        std::uint64_t tmp = m_cardsBitmask;
-        std::uint64_t bit = tmp & -static_cast<std::int64_t>(tmp);
-        m_cardsBitmask &= ~bit;
-        return calculateCardFromMask(bit);
+        const Card card = calculateCardFromMask(m_cardsBitmask);
+        m_cardsBitmask &= m_cardsBitmask - 1;
+        return card;
     }
     inline constexpr Deck popCards(std::size_t count) noexcept
     {
@@ -256,14 +255,7 @@ public:
     {
         return DeckIterator(0);
     }
-    inline constexpr bool operator==(const Deck &other) const noexcept
-    {
-        return m_cardsBitmask == other.m_cardsBitmask;
-    }
-    inline constexpr bool operator!=(const Deck &other) const noexcept
-    {
-        return m_cardsBitmask != other.m_cardsBitmask;
-    }
+    inline constexpr bool operator==(const Deck &other) const noexcept = default;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Deck &deck)

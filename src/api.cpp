@@ -1,4 +1,5 @@
 #include <expected>
+#include <ranges>
 #include "../include/game.hpp"
 #include <BS_thread_pool.hpp>
 #include <glaze/glaze.hpp>
@@ -14,13 +15,21 @@ struct glz::from<glz::JSON, Deck>
         if (bool(ctx.error))
             return;
         value = Deck::parseHand(str_value);
+        // parseHand silently skips invalid and repeated cards; reject them instead.
+        const auto tokens = std::ranges::count_if(str_value | std::views::split(' '), [](auto &&token)
+                                                  { return !std::ranges::empty(token); });
+        if (static_cast<std::size_t>(tokens) != value.size())
+        {
+            ctx.error = glz::error_code::constraint_violated;
+            ctx.custom_error_message = "cards must be distinct and written like \"Ah Td\"";
+        }
     }
 };
 struct ProbabilitiesRequest
 {
     Deck hand;
     Deck table;
-    std::size_t numPlayers;
+    std::size_t numPlayers = 2;
     std::size_t numSimulations = 1'000'000;
     struct glaze
     {
@@ -54,26 +63,32 @@ struct ProbabilityResult
 template<typename TFunc>
 static void handleRequest(const drogon::HttpRequestPtr &req, std::function<void(const drogon::HttpResponsePtr &)> &&callback, TFunc &&logicFunc)
 {
+    const auto badRequest = [&](std::string_view message)
+    {
+        auto objectJson = glz::write_json(ErrorResponse{message});
+        auto resp = drogon::HttpResponse::newHttpResponse();
+        if (!objectJson)
+        {
+            resp->setStatusCode(drogon::HttpStatusCode::k500InternalServerError);
+            callback(resp);
+            return;
+        }
+        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
+        resp->setBody(std::move(*objectJson));
+        resp->setStatusCode(drogon::HttpStatusCode::k400BadRequest);
+        callback(resp);
+    };
     std::string_view body = req->getBody();
     ProbabilitiesRequest probReq;
     auto error = glz::read_json(probReq, body);
     if (error)
     {
-        auto formatted = glz::format_error(error, body);
-        ErrorResponse errorResponse{formatted};
-        auto objectJson = glz::write_json(errorResponse);
-        if (!objectJson)
-        {
-            auto resp = drogon::HttpResponse::newHttpResponse();
-            resp->setStatusCode(drogon::HttpStatusCode::k500InternalServerError);
-            callback(resp);
-            return;
-        }
-        auto resp = drogon::HttpResponse::newHttpResponse();
-        resp->setContentTypeCode(drogon::CT_APPLICATION_JSON);
-        resp->setBody(std::move(*objectJson));
-        resp->setStatusCode(drogon::HttpStatusCode::k400BadRequest);
-        callback(resp);
+        badRequest(glz::format_error(error, body));
+        return;
+    }
+    if (probReq.hand.size() != 2 || probReq.table.size() > 5 || (probReq.hand.getMask() & probReq.table.getMask()) != 0)
+    {
+        badRequest("hand must have 2 cards, table at most 5, and no card may appear in both");
         return;
     }
     auto result = logicFunc(probReq);

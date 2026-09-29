@@ -1,60 +1,55 @@
 #ifndef __POKER_CLASSIFICATION_RESULT_HPP__
 #define __POKER_CLASSIFICATION_RESULT_HPP__
+#include <compare>
 #include "card_enums.hpp"
+// Layout: [category index:4][primary ranks:13][kicker ranks:13].
+// primary = ranks forming the made hand (pair/trips/quads, or the whole mask for
+// straight/flush/high card); kickers = tie breakers. Compares as a single integer.
 struct ClassificationResult
 {
 private:
     std::uint32_t m_mask;
 public:
     inline constexpr ClassificationResult() noexcept = default;
-    inline constexpr ClassificationResult(const Classification classification, const Rank rankFlag) noexcept : m_mask((static_cast<std::uint32_t>(classification) << 13) | static_cast<std::uint32_t>(rankFlag)) {}
+    inline constexpr ClassificationResult(const Classification classification, const std::uint16_t primary, const std::uint16_t kickers = 0) noexcept
+        : m_mask((static_cast<std::uint32_t>(getClassificationIndex(classification)) << 26) | (static_cast<std::uint32_t>(primary) << 13) | kickers) {}
+    inline constexpr ClassificationResult(const Classification classification, const Rank primary, const Rank kickers = Rank{}) noexcept
+        : ClassificationResult(classification, static_cast<std::uint16_t>(primary), static_cast<std::uint16_t>(kickers)) {}
     inline constexpr Classification getClassification() const noexcept
     {
-        return static_cast<Classification>(m_mask >> 13);
+        return static_cast<Classification>(1u << (m_mask >> 26));
     }
-    inline constexpr Rank getRankFlag() const noexcept
+    inline constexpr Rank getPrimary() const noexcept
+    {
+        return static_cast<Rank>((m_mask >> 13) & 0x1FFF);
+    }
+    inline constexpr Rank getKickers() const noexcept
     {
         return static_cast<Rank>(m_mask & 0x1FFF);
     }
-    inline constexpr bool operator<(const ClassificationResult &other) const noexcept
-    {
-        return m_mask < other.m_mask;
-    }
-    inline constexpr bool operator==(const ClassificationResult &other) const noexcept
-    {
-        return m_mask == other.m_mask;
-    }
-    inline constexpr bool operator!=(const ClassificationResult &other) const noexcept
-    {
-        return !(*this == other);
-    }
-    inline constexpr bool operator>(const ClassificationResult &other) const noexcept
-    {
-        return other < *this;
-    }
-    inline constexpr bool operator<=(const ClassificationResult &other) const noexcept
-    {
-        return !(*this > other);
-    }
-    inline constexpr bool operator>=(const ClassificationResult &other) const noexcept
-    {
-        return !(*this < other);
-    }
+    inline constexpr auto operator<=>(const ClassificationResult &) const noexcept = default;
 };
-inline std::ostream &operator<<(std::ostream &os, const ClassificationResult result) noexcept
+inline void printRanks(std::ostream &os, Rank ranks)
 {
-    os << result.getClassification() << ": ";
-    int rankFlag = static_cast<int>(result.getRankFlag());
-    while (rankFlag > 0)
+    auto bits = static_cast<std::uint32_t>(ranks);
+    while (bits)
     {
-        int rank = std::countr_zero(static_cast<uint32_t>(rankFlag));
-        int rankValue = 1 << rank;
-        rankFlag &= ~rankValue;
-        os << static_cast<Rank>(rankValue);
-        if (rankFlag > 0)
+        os << static_cast<Rank>(1u << std::countr_zero(bits));
+        bits &= bits - 1;
+        if (bits)
         {
             os << ' ';
         }
+    }
+}
+inline std::ostream &operator<<(std::ostream &os, const ClassificationResult result)
+{
+    os << result.getClassification() << ": ";
+    printRanks(os, result.getPrimary());
+    if (result.getKickers() != Rank{})
+    {
+        os << " + ";
+        printRanks(os, result.getKickers());
     }
     return os;
 }

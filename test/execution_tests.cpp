@@ -46,9 +46,10 @@ TEST(ExecutionTests, QHighFlushVsTheFieldOnA4SpadeBoard)
 
 TEST(ExecutionTests, TwoPairOnTheBoardKickerWars)
 {
+    // Opponent overpairs (JJ+) make a higher two pair (e.g. QQ TT 9) and beat TT 99 A.
     double probability = calculateProbability("ac ks", "td 9c 9s th 2h", 500'000, 8);
-    EXPECT_GE(probability, 0.18);
-    EXPECT_LE(probability, 0.22);
+    EXPECT_GE(probability, 0.165);
+    EXPECT_LE(probability, 0.185);
 }
 
 TEST(ExecutionTests, StraightOnPairedBoardVsTheField) // Nome corrigido
