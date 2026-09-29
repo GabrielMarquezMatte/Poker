@@ -35,9 +35,9 @@ private:
     }
 
     constexpr explicit Deck(std::uint64_t mask) : m_cardsBitmask(mask) {}
-    static inline constexpr Deck from_mask(std::uint64_t m) noexcept { return Deck(m); }
 
 public:
+    static inline constexpr Deck from_mask(std::uint64_t m) noexcept { return Deck(m); }
     struct DeckIterator
     {
         std::uint64_t m_mask;

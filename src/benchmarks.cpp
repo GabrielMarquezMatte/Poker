@@ -471,6 +471,32 @@ static void BM_ClassificationThroughput(benchmark::State &state)
 }
 BENCHMARK(BM_ClassificationThroughput);
 
+// Same as above, but with far more distinct hands than the branch predictor can memorize,
+// so branch costs match a real simulation.
+static void BM_ClassificationRandomThroughput(benchmark::State &state)
+{
+    omp::XoroShiro128Plus rng(42);
+    constexpr std::size_t batchSize = 1 << 20;
+    std::vector<Deck> hands;
+    hands.reserve(batchSize);
+    for (std::size_t i = 0; i < batchSize; ++i)
+    {
+        Deck deck = Deck::createFullDeck();
+        hands.push_back(deck.popRandomCards(rng, 7));
+    }
+
+    for (auto _ : state)
+    {
+        for (const auto &hand : hands)
+        {
+            ClassificationResult result = Hand::classify(hand);
+            benchmark::DoNotOptimize(result);
+        }
+    }
+    state.SetItemsProcessed(state.iterations() * batchSize);
+}
+BENCHMARK(BM_ClassificationRandomThroughput);
+
 static void BM_SimulationThroughput(benchmark::State &state)
 {
     omp::XoroShiro128Plus rng(state.thread_index() + state.iterations());

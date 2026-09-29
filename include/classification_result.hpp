@@ -4,7 +4,8 @@
 #include "card_enums.hpp"
 // Layout: [category index:4][primary ranks:13][kicker ranks:13].
 // primary = ranks forming the made hand (pair/trips/quads, or the whole mask for
-// straight/flush/high card); kickers = tie breakers. Compares as a single integer.
+// straight/flush); kickers = tie breakers (all five cards for high card).
+// Compares as a single integer.
 struct ClassificationResult
 {
 private:
@@ -15,6 +16,13 @@ public:
         : m_mask((static_cast<std::uint32_t>(getClassificationIndex(classification)) << 26) | (static_cast<std::uint32_t>(primary) << 13) | kickers) {}
     inline constexpr ClassificationResult(const Classification classification, const Rank primary, const Rank kickers = Rank{}) noexcept
         : ClassificationResult(classification, static_cast<std::uint16_t>(primary), static_cast<std::uint16_t>(kickers)) {}
+    // For category indices computed at runtime (0 = HighCard ... 9 = RoyalFlush).
+    static inline constexpr ClassificationResult fromIndex(const std::uint32_t categoryIndex, const std::uint16_t primary, const std::uint16_t kickers) noexcept
+    {
+        ClassificationResult result;
+        result.m_mask = (categoryIndex << 26) | (static_cast<std::uint32_t>(primary) << 13) | kickers;
+        return result;
+    }
     inline constexpr Classification getClassification() const noexcept
     {
         return static_cast<Classification>(1u << (m_mask >> 26));
@@ -46,11 +54,11 @@ inline std::ostream &operator<<(std::ostream &os, const ClassificationResult res
 {
     os << result.getClassification() << ": ";
     printRanks(os, result.getPrimary());
-    if (result.getKickers() != Rank{})
+    if (result.getPrimary() != Rank{} && result.getKickers() != Rank{})
     {
         os << " + ";
-        printRanks(os, result.getKickers());
     }
+    printRanks(os, result.getKickers());
     return os;
 }
 #endif // __POKER_CLASSIFICATION_RESULT_HPP__

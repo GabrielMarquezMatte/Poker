@@ -99,50 +99,6 @@ inline constexpr double probabilityOfWinning(TRng &rng, const Deck playerCards, 
     }
     return static_cast<double>(wins) / numSimulations;
 }
-inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
-{
-    std::size_t numThreads = threadPool.get_thread_count();
-    std::size_t simulationsPerThread = numSimulations / numThreads;
-    std::vector<std::future<std::size_t>> threads;
-    threads.reserve(numThreads);
-    std::size_t remainingSimulations = numSimulations % numThreads;
-    Deck deck = Deck::createFullDeck();
-    deck.removeCards(playerCards);
-    deck.removeCards(tableCards);
-    std::random_device rd{};
-    for (std::size_t i = 0; i < numThreads; ++i)
-    {
-        auto rng_seed = rd();
-        threads.push_back(threadPool.submit_task([&, deck, i, rng_seed]()
-                               {
-            static thread_local omp::XoroShiro128Plus threadRng(rng_seed);
-            std::size_t threadWins = 0;
-            Deck threadDeck = deck;
-            for (std::size_t j = 0; j < simulationsPerThread; ++j)
-            {
-                if (playerWinsRandomGame(threadRng, playerCards, tableCards, threadDeck, numPlayers))
-                {
-                    ++threadWins;
-                }
-            }
-            return threadWins; }));
-    }
-    std::size_t wins = 0;
-    static thread_local omp::XoroShiro128Plus threadRng(rd());
-    Deck threadDeck = deck;
-    for (std::size_t i = 0; i < remainingSimulations; ++i)
-    {
-        if (playerWinsRandomGame(threadRng, playerCards, tableCards, threadDeck, numPlayers))
-        {
-            ++wins;
-        }
-    }
-    for (auto &thread : threads)
-    {
-        wins += thread.get();
-    }
-    return static_cast<double>(wins) / numSimulations;
-}
 struct GameStatistics
 {
     std::size_t wins = 0;
@@ -151,6 +107,28 @@ struct GameStatistics
     inline constexpr std::size_t totalGames() const noexcept
     {
         return wins + losses + ties;
+    }
+    inline constexpr void add(GameResult result) noexcept
+    {
+        switch (result)
+        {
+        case GameResult::Win:
+            ++wins;
+            break;
+        case GameResult::Lose:
+            ++losses;
+            break;
+        case GameResult::Tie:
+            ++ties;
+            break;
+        }
+    }
+    inline constexpr GameStatistics &operator+=(const GameStatistics &other) noexcept
+    {
+        wins += other.wins;
+        losses += other.losses;
+        ties += other.ties;
+        return *this;
     }
 };
 template <typename TRng>
@@ -162,83 +140,110 @@ inline GameStatistics computeRandomGameStatistics(TRng &rng, const Deck playerCa
     deck.removeCards(tableCards);
     for (std::size_t i = 0; i < numSimulations; ++i)
     {
-        GameResult result = compareRandomHands(rng, playerCards, tableCards, deck, numPlayers);
-        switch (result)
-        {
-        case GameResult::Win:
-            ++stats.wins;
-            break;
-        case GameResult::Lose:
-            ++stats.losses;
-            break;
-        case GameResult::Tie:
-            ++stats.ties;
-            break;
-        }
+        stats.add(compareRandomHands(rng, playerCards, tableCards, deck, numPlayers));
     }
     return stats;
 }
+
+// Ordered ways to deal the missing board cards and then `opponents` hole pairs from `deckSize` cards.
+inline constexpr double exactDealCount(std::size_t deckSize, std::size_t boardMissing, std::size_t opponents) noexcept
+{
+    double ways = 1;
+    for (std::size_t i = 0; i < boardMissing; ++i)
+    {
+        ways = ways * static_cast<double>(deckSize - i) / static_cast<double>(i + 1);
+    }
+    deckSize -= boardMissing;
+    for (std::size_t i = 0; i < opponents; ++i, deckSize -= 2)
+    {
+        ways *= static_cast<double>(deckSize * (deckSize - 1) / 2);
+    }
+    return ways;
+}
+
+// Calls f(subset) for every k-card subset of `cards`.
+template <typename F>
+inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std::uint64_t chosen, F &&f)
+{
+    if (k == 0)
+    {
+        f(chosen);
+        return;
+    }
+    for (; static_cast<std::size_t>(std::popcount(cards)) >= k; cards &= cards - 1)
+    {
+        const std::uint64_t lowest = cards & (~cards + 1);
+        forEachCombination(cards & (cards - 1), k - 1, chosen | lowest, f);
+    }
+}
+
+inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, bool sawTie, GameStatistics &stats)
+{
+    if (opponents == 0)
+    {
+        ++(sawTie ? stats.ties : stats.wins);
+        return;
+    }
+    // A loss is decided as soon as one opponent wins; count every deal of the remaining opponents at once.
+    const auto remainingDeals = static_cast<std::size_t>(exactDealCount(static_cast<std::size_t>(std::popcount(deck)) - 2, 0, opponents - 1));
+    forEachCombination(deck, 2, 0, [&](std::uint64_t hole)
+                       {
+        const ClassificationResult result = Hand::classify(Deck::from_mask(hole | board));
+        if (result > player)
+        {
+            stats.losses += remainingDeals;
+            return;
+        }
+        enumerateOpponents(deck & ~hole, board, player, opponents - 1, sawTie || result == player, stats); });
+}
+
+// Every possible deal counted once (opponents in seat order), so the ratios are exact.
+inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers)
+{
+    GameStatistics stats;
+    const std::uint64_t deck = Deck::createFullDeck().getMask() & ~playerCards.getMask() & ~tableCards.getMask();
+    forEachCombination(deck, 5 - tableCards.size(), 0, [&](std::uint64_t boardRest)
+                       {
+        const std::uint64_t board = tableCards.getMask() | boardRest;
+        const ClassificationResult player = Hand::classify(Deck::from_mask(playerCards.getMask() | board));
+        enumerateOpponents(deck & ~boardRest, board, player, numPlayers - 1, false, stats); });
+    return stats;
+}
+
 inline GameStatistics computeRandomGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
-    std::size_t numThreads = threadPool.get_thread_count();
-    std::size_t simulationsPerThread = numSimulations / numThreads;
+    const std::size_t numThreads = threadPool.get_thread_count();
+    // Enumeration is exact and, up to this size, no slower than the parallel simulation.
+    const std::size_t deckSize = 52 - playerCards.size() - tableCards.size();
+    if (exactDealCount(deckSize, 5 - tableCards.size(), numPlayers - 1) <= static_cast<double>(numSimulations / numThreads))
+    {
+        return exactGameStatistics(playerCards, tableCards, numPlayers);
+    }
+
+    const std::size_t simulationsPerThread = numSimulations / numThreads;
     std::vector<std::future<GameStatistics>> threads;
     threads.reserve(numThreads);
-    std::size_t remainingSimulations = numSimulations % numThreads;
-    Deck deck = Deck::createFullDeck();
-    deck.removeCards(playerCards);
-    deck.removeCards(tableCards);
+    std::random_device rd{};
     for (std::size_t i = 0; i < numThreads; ++i)
     {
-        threads.push_back(threadPool.submit_task([&, deck, i]()
-                               {
-            omp::XoroShiro128Plus threadRng(std::random_device{}());
-            GameStatistics threadStats;
-            Deck threadDeck = deck;
-            for (std::size_t j = 0; j < simulationsPerThread; ++j)
-            {
-                GameResult result = compareRandomHands(threadRng, playerCards, tableCards, threadDeck, numPlayers);
-                switch (result)
-                {
-                case GameResult::Win:
-                    ++threadStats.wins;
-                    break;
-                case GameResult::Lose:
-                    ++threadStats.losses;
-                    break;
-                case GameResult::Tie:
-                    ++threadStats.ties;
-                    break;
-                }
-            }
-            return threadStats; }));
+        threads.push_back(threadPool.submit_task([&, seed = rd()]()
+                                                 {
+            omp::XoroShiro128Plus threadRng(seed);
+            return computeRandomGameStatistics(threadRng, playerCards, tableCards, simulationsPerThread, numPlayers); }));
     }
-    GameStatistics stats;
-    omp::XoroShiro128Plus threadRng(std::random_device{}());
-    Deck threadDeck = deck;
-    for (std::size_t i = 0; i < remainingSimulations; ++i)
-    {
-        GameResult result = compareRandomHands(threadRng, playerCards, tableCards, threadDeck, numPlayers);
-        switch (result)
-        {
-        case GameResult::Win:
-            ++stats.wins;
-            break;
-        case GameResult::Lose:
-            ++stats.losses;
-            break;
-        case GameResult::Tie:
-            ++stats.ties;
-            break;
-        }
-    }
+    omp::XoroShiro128Plus rng(rd());
+    GameStatistics stats = computeRandomGameStatistics(rng, playerCards, tableCards, numSimulations % numThreads, numPlayers);
     for (auto &thread : threads)
     {
-        GameStatistics threadStats = thread.get();
-        stats.wins += threadStats.wins;
-        stats.losses += threadStats.losses;
-        stats.ties += threadStats.ties;
+        stats += thread.get();
     }
     return stats;
+}
+
+// Probability of not losing: ties count as wins.
+inline double probabilityOfWinning(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
+{
+    const GameStatistics stats = computeRandomGameStatistics(playerCards, tableCards, numSimulations, numPlayers, threadPool);
+    return static_cast<double>(stats.wins + stats.ties) / static_cast<double>(stats.totalGames());
 }
 #endif // __POKER_GAME_HPP__

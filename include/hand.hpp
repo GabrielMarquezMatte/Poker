@@ -26,51 +26,6 @@ private:
             return s0 | s1 | s2 | s3;
         }
     };
-    struct CountInfo
-    {
-        std::uint8_t maxCount;
-        std::uint8_t secondMaxCount;
-        std::uint16_t pairs;     // pair rank bits (Pair/TwoPair), or pair rank for FullHouse
-        std::uint16_t majorRank; // trips rank bit (maxCount==3) or quads rank bit (maxCount==4)
-    };
-    static inline constexpr CountInfo topTwoCounts(SuitMasks suits) noexcept
-    {
-        const std::uint16_t p01 = suits.s0 & suits.s1;
-        const std::uint16_t p23 = suits.s2 & suits.s3;
-        const std::uint16_t all4 = p01 & p23;
-        if (all4) [[unlikely]]
-        {
-            // Quads always resolve before secondMaxCount is read (only SF beats them).
-            return {4, 0, 0, all4};
-        }
-        const std::uint16_t three = (p01 & (suits.s2 | suits.s3)) | (p23 & (suits.s0 | suits.s1));
-        if (three) [[unlikely]]
-        {
-            if (three & (three - 1u)) [[unlikely]]
-            {
-                const std::uint16_t tripsRank = highBit(three);
-                const std::uint16_t pairRank = static_cast<std::uint16_t>(three & ~tripsRank);
-                return {3, 2, pairRank, tripsRank};
-            }
-            const std::uint16_t without3 = ~three & 0x1FFFu;
-            const std::uint16_t s0w = suits.s0 & without3;
-            const std::uint16_t s1w = suits.s1 & without3;
-            const std::uint16_t s2w = suits.s2 & without3;
-            const std::uint16_t s3w = suits.s3 & without3;
-            const std::uint16_t two = (s0w & s1w) | (s2w & s3w) | ((s0w ^ s1w) & (s2w ^ s3w));
-            if (two) [[unlikely]]
-                return {3, 2, two, three};
-            return {3, 1, 0, three};
-        }
-        const std::uint16_t two = p01 | p23 | ((suits.s0 ^ suits.s1) & (suits.s2 ^ suits.s3));
-        if (two)
-        {
-            if (two & (two - 1u))
-                return {2, 2, two, 0};
-            return {2, 1, two, 0};
-        }
-        return {1, 0, 0, 0};
-    }
     static constexpr std::array<std::uint16_t, 1 << 13> straightTable = []()
     {
         std::array<std::uint16_t, 1 << 13> tbl{};
@@ -97,34 +52,15 @@ private:
     {
         std::array<uint16_t, 1 << 13> table{};
         for (std::uint32_t m = 0; m < (1 << 13); ++m)
+        {
             table[m] = (std::popcount(m) >= 5 ? uint16_t(m) : 0);
+        }
         return table;
     }();
     static inline constexpr std::uint16_t getFlush(SuitMasks suits) noexcept
     {
         return flushTable[suits.s0] | flushTable[suits.s1] | flushTable[suits.s2] | flushTable[suits.s3];
     }
-    static inline constexpr ClassificationResult makeTwoPair(std::uint16_t anySuit, std::uint16_t pairs) noexcept
-    {
-        const std::uint16_t pairBits = keepTopBits(pairs, 2);
-        return {Classification::TwoPair, pairBits, highBit(anySuit & ~pairBits)};
-    }
-
-    static inline constexpr ClassificationResult makePair(std::uint16_t anySuit, std::uint16_t pairs) noexcept
-    {
-        std::uint16_t k = anySuit ^ pairs;
-        const int excess = std::popcount(k) - 3;
-        if (excess > 0)
-        {
-            k &= k - 1u;
-        }
-        if (excess > 1)
-        {
-            k &= k - 1u;
-        }
-        return {Classification::Pair, pairs, k};
-    }
-
     static inline constexpr SuitMasks getSuitRanks(std::uint64_t deckMask) noexcept
     {
         constexpr std::uint64_t RANK_MASK = (1u << 13) - 1;
@@ -138,76 +74,62 @@ private:
 public:
     static inline constexpr ClassificationResult classify(const Deck cards) noexcept
     {
-        std::uint64_t deckMask = cards.getMask();
-        SuitMasks suits = getSuitRanks(deckMask);
+        const SuitMasks suits = getSuitRanks(cards.getMask());
         const std::uint16_t anySuit = suits.anySuit();
         const std::uint16_t flushMask = getFlush(suits);
         const std::uint16_t straightVal = straightTable[anySuit];
-        auto [maxCount, secondMaxCount, pairs, majorRank] = topTwoCounts(suits);
+
+        // Rank masks by multiplicity: quads (4 suits), three (>= 3), two (>= 2).
+        const std::uint16_t p01 = suits.s0 & suits.s1;
+        const std::uint16_t p23 = suits.s2 & suits.s3;
+        const std::uint16_t quads = p01 & p23;
+        const std::uint16_t three = (p01 & (suits.s2 | suits.s3)) | (p23 & (suits.s0 | suits.s1));
+        const std::uint16_t two = p01 | p23 | ((suits.s0 ^ suits.s1) & (suits.s2 ^ suits.s3));
+        const std::uint16_t pairsOnly = two & ~three;
+        const bool fullHouse = (three != 0) & ((static_cast<std::uint16_t>(three & (three - 1u)) | pairsOnly) != 0);
+
+        // Rare categories: branches are almost never taken, so they predict well.
         if (flushMask) [[unlikely]]
         {
             const std::uint16_t straightValFlush = straightTable[flushMask];
             if (straightValFlush) [[unlikely]]
             {
                 if (straightValFlush == static_cast<std::uint16_t>(Rank::Ace))
+                {
                     return {Classification::RoyalFlush, Rank::Ace | Rank::King | Rank::Queen | Rank::Jack | Rank::Ten};
-                return {Classification::StraightFlush, static_cast<Rank>(straightValFlush)};
+                }
+                return {Classification::StraightFlush, straightValFlush};
             }
-            if (maxCount == 4) [[unlikely]]
-            {
-                return {Classification::FourOfAKind, majorRank, highBit(anySuit & ~majorRank)};
-            }
-            if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
-            {
-                return {Classification::FullHouse, majorRank, highBit(pairs)};
-            }
+        }
+        if (quads) [[unlikely]]
+        {
+            return {Classification::FourOfAKind, quads, highBit(anySuit & ~quads)};
+        }
+        if (fullHouse) [[unlikely]]
+        {
+            const std::uint16_t trips = highBit(three);
+            return {Classification::FullHouse, trips, highBit((three & ~trips) | pairsOnly)};
+        }
+        if (flushMask) [[unlikely]]
+        {
             return {Classification::Flush, keepTopBits(flushMask, 5)};
-        }
-        if (maxCount == 4) [[unlikely]]
-        {
-            return {Classification::FourOfAKind, majorRank, highBit(anySuit & ~majorRank)};
-        }
-        if (maxCount == 3 && secondMaxCount == 2) [[unlikely]]
-        {
-            return {Classification::FullHouse, majorRank, highBit(pairs)};
         }
         if (straightVal) [[unlikely]]
         {
             return {Classification::Straight, straightVal};
         }
-        if (maxCount == 3)
-        {
-            std::uint16_t k = anySuit & ~majorRank;
-            const int excess = std::popcount(k) - 2;
-            if (excess > 0)
-            {
-                k &= k - 1u;
-            }
-            if (excess > 1)
-            {
-                k &= k - 1u;
-            }
-            return {Classification::ThreeOfAKind, majorRank, k};
-        }
-        if (maxCount != 2)
-        {
-            std::uint16_t hc = anySuit;
-            const int excess = std::popcount(hc) - 5;
-            if (excess > 0)
-            {
-                hc &= hc - 1u;
-            }
-            if (excess > 1)
-            {
-                hc &= hc - 1u;
-            }
-            return {Classification::HighCard, hc};
-        }
-        if (secondMaxCount == 2)
-        {
-            return makeTwoPair(anySuit, pairs);
-        }
-        return makePair(anySuit, pairs);
+
+        // HighCard / Pair / TwoPair / ThreeOfAKind (~90% of hands) share one branch-free path:
+        // which of them it is changes from hand to hand, so branching on it mispredicts a lot.
+        // Here `three` has at most one bit and pairsOnly is empty when it does.
+        const std::uint16_t lowestPair = pairsOnly & (~pairsOnly + 1u);
+        const std::uint16_t topPairs = pairsOnly ^ (std::popcount(pairsOnly) > 2 ? lowestPair : 0);
+        const bool isTrips = three != 0;
+        const std::uint16_t primary = isTrips ? three : topPairs;
+        const int pairCount = std::popcount(topPairs);
+        const int madeCards = isTrips ? 3 : 2 * pairCount;
+        const std::uint32_t category = isTrips ? 3u : static_cast<std::uint32_t>(pairCount);
+        return ClassificationResult::fromIndex(category, primary, keepTopBits(anySuit & ~primary, 5 - madeCards));
     }
 };
 #endif // __POKER_HAND_HPP__

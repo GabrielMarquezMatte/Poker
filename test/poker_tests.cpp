@@ -119,7 +119,7 @@ TEST(DeckTest, ClassifyHighCard)
                                                    Card(Suit::Hearts, Rank::Seven),
                                                    Card(Suit::Diamonds, Rank::Six)});
     static constexpr ClassificationResult result = Hand::classify(deck);
-    static_assert(result == ClassificationResult(Classification::HighCard, Rank::Ace | Rank::Seven | Rank::Six | Rank::Four | Rank::Two), "Expected High Card classification");
+    static_assert(result == ClassificationResult(Classification::HighCard, Rank{}, Rank::Ace | Rank::Seven | Rank::Six | Rank::Four | Rank::Two), "Expected High Card classification");
 }
 
 //
