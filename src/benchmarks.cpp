@@ -435,6 +435,19 @@ static void BM_ExactVsSimulated(benchmark::State &st)
 }
 BENCHMARK(BM_ExactVsSimulated)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
 
+static void BM_ExactMultiway(benchmark::State &st)
+{
+    const Deck playerCards = Deck::parseHand("jh 6h");
+    const Deck tableCards = Deck::parseHand(st.range(0) ? "qs 8h th 2h 3d" : "qs 8h th 2h");
+    BS::thread_pool<BS::tp::none> threadPool(std::thread::hardware_concurrency());
+    for (auto _ : st)
+    {
+        GameStatistics stats = exactGameStatistics(playerCards, tableCards, st.range(1), threadPool);
+        benchmark::DoNotOptimize(stats);
+    }
+}
+BENCHMARK(BM_ExactMultiway)->Args({0, 3})->Args({1, 3})->Args({1, 4})->Unit(benchmark::kMillisecond);
+
 BENCHMARK(BM_ProbabilityOfWinningPreflopApi)->ArgsProduct({{2, 6, 10}, {0, 1}})->Unit(benchmark::kMicrosecond);
 
 static void BM_ProbabilityOfWinningParallelScaling(benchmark::State &st)

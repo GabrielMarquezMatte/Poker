@@ -156,6 +156,24 @@ TEST(Equity, SimulationMatchesExactMultiway)
     EXPECT_LE(exact.equity(), exact.notLosing());
 }
 
+TEST(ExactEnumeration, MultiwayGoldenCounts)
+{
+    const auto expect = [](std::string_view board, std::size_t players, std::size_t wins, std::size_t losses, std::size_t ties, std::uint64_t potShares)
+    {
+        for (const GameStatistics &stats : {exactGameStatistics(Deck::parseHand("jh 6h"), Deck::parseHand(board), players),
+                                            exactGameStatistics(Deck::parseHand("jh 6h"), Deck::parseHand(board), players, threadPool)})
+        {
+            EXPECT_EQ(stats.wins, wins) << board << " " << players;
+            EXPECT_EQ(stats.losses, losses) << board << " " << players;
+            EXPECT_EQ(stats.ties, ties) << board << " " << players;
+            EXPECT_EQ(stats.potShares, potShares) << board << " " << players;
+        }
+    };
+    expect("qs 8h th 2h", 3, 37734288, 3388332, 0, 95090405760);
+    expect("qs 8h th 2h 3d", 4, 693439200, 39616200, 0, 1747466784000);
+    expect("7h 7c 7d 2s 2c", 4, 0, 212786100, 520269300, 327769659000);
+}
+
 TEST(ExactEnumeration, ParallelMatchesSequential)
 {
     const Deck player = Deck::parseHand("ah kd");

@@ -161,9 +161,33 @@ inline constexpr double exactDealCount(std::size_t deckSize, std::size_t boardMi
     return ways;
 }
 
+inline constexpr double exactDealCount(const Deck playerCards, const Deck tableCards, std::size_t numPlayers) noexcept
+{
+    return exactDealCount(52 - playerCards.size() - tableCards.size(), 5 - tableCards.size(), numPlayers - 1);
+}
+
+template <typename F>
+inline constexpr void forEachPair(std::uint64_t cards, F &&f)
+{
+    for (; cards; cards &= cards - 1)
+    {
+        const std::uint64_t lowest = cards & (~cards + 1);
+        for (std::uint64_t rest = cards & (cards - 1); rest; rest &= rest - 1)
+        {
+            f(lowest | (rest & (~rest + 1)));
+        }
+    }
+}
+
 template <typename F>
 inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std::uint64_t chosen, F &&f)
 {
+    if (k == 2)
+    {
+        forEachPair(cards, [&](std::uint64_t pair)
+                    { f(chosen | pair); });
+        return;
+    }
     if (k == 0)
     {
         f(chosen);
@@ -176,35 +200,54 @@ inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std
     }
 }
 
-inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats);
+using TieCounts = std::array<std::uint64_t, 10>;
 
-inline constexpr void dealOpponent(std::uint64_t deck, std::uint64_t hole, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats)
+// Adds to counts[t] the unordered sets of k pairwise-disjoint hands from hands[start, size) that tie the player t times.
+// Hands at index >= tieStart tie the player, the rest lose to it.
+inline constexpr void countDisjointHands(const std::uint64_t *hands, std::size_t size, std::size_t tieStart, std::size_t start, std::size_t k, std::uint64_t used, std::size_t ties, TieCounts &counts) noexcept
 {
-    const ClassificationResult result = Hand::classify(Deck::from_mask(hole | board));
-    if (result > player)
+    if (k == 0)
     {
-        stats.losses += static_cast<std::size_t>(exactDealCount(static_cast<std::size_t>(std::popcount(deck)) - 2, 0, opponents - 1));
+        ++counts[ties];
         return;
     }
-    enumerateOpponents(deck & ~hole, board, player, opponents - 1, winners + (result == player), stats);
-}
-
-inline constexpr void enumerateOpponents(std::uint64_t deck, std::uint64_t board, ClassificationResult player, std::size_t opponents, std::size_t winners, GameStatistics &stats)
-{
-    if (opponents == 0)
+    if (k == 1)
     {
-        stats.record(winners);
+        std::uint64_t clear = 0;
+        std::uint64_t clearTies = 0;
+        for (std::size_t i = start; i < tieStart; ++i)
+        {
+            clear += (hands[i] & used) == 0;
+        }
+        for (std::size_t i = std::max(start, tieStart); i < size; ++i)
+        {
+            clearTies += (hands[i] & used) == 0;
+        }
+        counts[ties] += clear;
+        counts[ties + 1] += clearTies;
         return;
     }
-    forEachCombination(deck, 2, 0, [&](std::uint64_t hole)
-                       { dealOpponent(deck, hole, board, player, opponents, winners, stats); });
+    for (std::size_t i = start; i < size; ++i)
+    {
+        if ((hands[i] & used) == 0)
+        {
+            countDisjointHands(hands, size, tieStart, i + 1, k - 1, used | hands[i], ties + (i >= tieStart), counts);
+        }
+    }
 }
 
+// With parts > 1 losses are left at 0: the caller derives them from the total once all parts are summed.
 inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers, std::size_t part = 0, std::size_t parts = 1)
 {
     GameStatistics stats;
     const std::uint64_t deck = Deck::createFullDeck().getMask() & ~playerCards.getMask() & ~tableCards.getMask();
     const std::size_t boardMissing = 5 - tableCards.size();
+    const std::size_t opponents = numPlayers - 1;
+    std::uint64_t orderings = 1;
+    for (std::size_t i = 2; i <= opponents; ++i)
+    {
+        orderings *= i;
+    }
     const bool splitBoards = exactDealCount(static_cast<std::size_t>(std::popcount(deck)), boardMissing, 0) >= 4.0 * static_cast<double>(parts);
     std::size_t owner = 0;
     const auto mine = [&]()
@@ -222,18 +265,54 @@ inline constexpr GameStatistics exactGameStatistics(const Deck playerCards, cons
         const std::uint64_t board = tableCards.getMask() | boardRest;
         const std::uint64_t rest = deck & ~boardRest;
         const ClassificationResult player = Hand::classify(Deck::from_mask(playerCards.getMask() | board));
-        forEachCombination(rest, 2, 0, [&](std::uint64_t hole)
-                           {
+        // Classify each opponent hand once per board; hands that beat the player only ever produce losses.
+        constexpr std::size_t maxHands = 45 * 44 / 2;
+        std::array<std::uint64_t, maxHands> hands;
+        std::array<std::uint64_t, maxHands> tiedHands;
+        std::size_t size = 0;
+        std::size_t tieCount = 0;
+        forEachPair(rest, [&](std::uint64_t hole)
+                    {
+            const ClassificationResult result = Hand::classify(Deck::from_mask(hole | board));
+            if (result < player)
+            {
+                hands[size++] = hole;
+            }
+            else if (result == player)
+            {
+                tiedHands[tieCount++] = hole;
+            } });
+        const std::size_t tieStart = size;
+        std::copy_n(tiedHands.begin(), tieCount, hands.begin() + size);
+        size += tieCount;
+        // Opponents are interchangeable, so count unordered sets and scale by the orderings.
+        TieCounts counts{};
+        for (std::size_t i = 0; i < size; ++i)
+        {
             if (splitBoards || mine())
             {
-                dealOpponent(rest, hole, board, player, numPlayers - 1, 1, stats);
-            } }); });
+                countDisjointHands(hands.data(), size, tieStart, i + 1, opponents - 1, hands[i], i >= tieStart, counts);
+            }
+        }
+        for (std::size_t ties = 0; ties < counts.size(); ++ties)
+        {
+            const std::uint64_t games = counts[ties] * orderings;
+            (ties == 0 ? stats.wins : stats.ties) += games;
+            stats.potShares += games * (GameStatistics::fullPot / (ties + 1));
+        } });
+    if (parts == 1)
+    {
+        stats.losses = static_cast<std::size_t>(exactDealCount(static_cast<std::size_t>(std::popcount(deck)), boardMissing, opponents)) - stats.wins - stats.ties;
+    }
     return stats;
 }
 
+// More tasks than threads so fast cores (P-cores on hybrid CPUs) pick up the slack instead of idling.
+inline constexpr std::size_t tasksPerThread = 8;
+
 inline GameStatistics exactGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
-    const std::size_t parts = threadPool.get_thread_count();
+    const std::size_t parts = threadPool.get_thread_count() * tasksPerThread;
     std::vector<std::future<GameStatistics>> results;
     results.reserve(parts);
     for (std::size_t part = 0; part < parts; ++part)
@@ -246,6 +325,7 @@ inline GameStatistics exactGameStatistics(const Deck playerCards, const Deck tab
     {
         stats += result.get();
     }
+    stats.losses = static_cast<std::size_t>(exactDealCount(playerCards, tableCards, numPlayers)) - stats.wins - stats.ties;
     return stats;
 }
 
@@ -272,23 +352,24 @@ inline constexpr GameStatistics preflopStatistics(const Deck holeCards, std::siz
 
 inline GameStatistics simulateGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers, BS::thread_pool<BS::tp::none> &threadPool)
 {
+    constexpr std::size_t minSimulationsPerTask = 4096;
     const std::size_t numThreads = threadPool.get_thread_count();
-    const std::size_t simulationsPerThread = numSimulations / numThreads;
-    std::vector<std::future<GameStatistics>> threads;
-    threads.reserve(numThreads);
+    const std::size_t numTasks = std::max(numThreads, std::min(numThreads * tasksPerThread, numSimulations / minSimulationsPerTask));
+    std::vector<std::future<GameStatistics>> tasks;
+    tasks.reserve(numTasks);
     std::random_device rd{};
-    for (std::size_t i = 0; i < numThreads; ++i)
+    for (std::size_t i = 0; i < numTasks; ++i)
     {
-        threads.push_back(threadPool.submit_task([&, seed = rd()]()
-                                                 {
-            omp::XoroShiro128Plus threadRng(seed);
-            return computeRandomGameStatistics(threadRng, playerCards, tableCards, simulationsPerThread, numPlayers); }));
+        const std::size_t simulations = numSimulations / numTasks + (i < numSimulations % numTasks);
+        tasks.push_back(threadPool.submit_task([&, simulations, seed = rd()]()
+                                               {
+            omp::XoroShiro128Plus taskRng(seed);
+            return computeRandomGameStatistics(taskRng, playerCards, tableCards, simulations, numPlayers); }));
     }
-    omp::XoroShiro128Plus rng(rd());
-    GameStatistics stats = computeRandomGameStatistics(rng, playerCards, tableCards, numSimulations % numThreads, numPlayers);
-    for (auto &thread : threads)
+    GameStatistics stats;
+    for (auto &task : tasks)
     {
-        stats += thread.get();
+        stats += task.get();
     }
     return stats;
 }
@@ -296,11 +377,6 @@ inline GameStatistics simulateGameStatistics(const Deck playerCards, const Deck 
 inline constexpr bool preferExact(double deals, std::size_t numSimulations) noexcept
 {
     return deals <= 1.5 * static_cast<double>(numSimulations);
-}
-
-inline constexpr double exactDealCount(const Deck playerCards, const Deck tableCards, std::size_t numPlayers) noexcept
-{
-    return exactDealCount(52 - playerCards.size() - tableCards.size(), 5 - tableCards.size(), numPlayers - 1);
 }
 
 inline std::optional<GameStatistics> quickGameStatistics(const Deck playerCards, const Deck tableCards, std::size_t numSimulations, std::size_t numPlayers)
