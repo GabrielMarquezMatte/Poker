@@ -136,6 +136,13 @@ struct Hunl
 
     static std::uint64_t infosetKey(const State &s) { return mix(s.history, s.bucket[s.street][s.toAct]); }
 
+    // For range tracking: the bucket and infoset key of the player to act if they held `hole`.
+    static std::uint16_t bucketFor(const State &s, std::uint64_t hole)
+    {
+        return s.street == 0 ? static_cast<std::uint16_t>(preflopClassIndex(Deck::from_mask(hole))) : C::postflopBucket(hole, s.board);
+    }
+    static std::uint64_t infosetKeyWithBucket(const State &s, std::uint16_t bucket) { return mix(s.history, bucket); }
+
     static Actions legalActions(const State &s)
     {
         Actions out;

@@ -45,6 +45,9 @@ target_link_libraries(${PROJECT_NAME}_Train PRIVATE bshoshany-thread-pool::bshos
 add_executable(${PROJECT_NAME}_PushFold src/push_fold.cpp)
 target_link_libraries(${PROJECT_NAME}_PushFold PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
 
+add_executable(${PROJECT_NAME}_Lbr src/lbr.cpp)
+target_link_libraries(${PROJECT_NAME}_Lbr PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
+
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)
 

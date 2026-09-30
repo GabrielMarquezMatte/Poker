@@ -10,6 +10,7 @@ add_executable(PokerTest
 	hand_indexer_test.cpp
 	card_abstraction_test.cpp
 	push_fold_test.cpp
+	lbr_test.cpp
 )
 target_compile_definitions(PokerTest PRIVATE POKER_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
 target_link_libraries(PokerTest gtest::gtest GTest::gtest_main bshoshany-thread-pool::bshoshany-thread-pool)

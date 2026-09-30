@@ -33,4 +33,25 @@ void countPublicNodes(const typename G::State &s, std::array<std::uint64_t, 4> &
         countPublicNodes<G>(G::apply(s, a), nodes, rng);
     }
 }
+// Upper bound on blueprint infosets: every public node times its street's bucket count.
+inline std::uint64_t blueprintInfosetBound(const CardAbstraction &abstraction, std::array<std::uint64_t, 4> &nodes)
+{
+    nodes = {};
+    CfrRng rng{1};
+    countPublicNodes<Blueprint>(Blueprint::initial(), nodes, rng);
+    std::uint64_t bound = nodes[0] * 169;
+    for (std::size_t street = 1; street < 4; ++street)
+    {
+        const auto &table = abstraction.buckets[street - 1];
+        bound += nodes[street] * (1 + *std::max_element(table.begin(), table.end()));
+    }
+    return bound;
+}
+
+// Table sized for the bound at a 2/3 load factor.
+inline std::size_t blueprintCapacity(const CardAbstraction &abstraction)
+{
+    std::array<std::uint64_t, 4> nodes{};
+    return blueprintInfosetBound(abstraction, nodes) * 3 / 2;
+}
 #endif // __POKER_CFR_BLUEPRINT_HPP__

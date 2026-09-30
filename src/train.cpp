@@ -79,17 +79,9 @@ int main(int argc, char **argv)
     }
     BlueprintConfig::abstraction = abstraction.get();
 
-    // Capacity: every public node times its street's buckets bounds the infoset count.
     std::array<std::uint64_t, 4> nodes{};
-    CfrRng rng{1};
-    countPublicNodes<Blueprint>(Blueprint::initial(), nodes, rng);
-    std::uint64_t bound = nodes[0] * 169;
-    for (std::size_t street = 1; street < 4; ++street)
-    {
-        const auto &table = abstraction->buckets[street - 1];
-        bound += nodes[street] * (1 + *std::max_element(table.begin(), table.end()));
-    }
-    auto solver = std::make_unique<Mccfr<Blueprint>>(bound * 3 / 2);
+    const std::uint64_t bound = blueprintInfosetBound(*abstraction, nodes);
+    auto solver = std::make_unique<Mccfr<Blueprint>>(blueprintCapacity(*abstraction));
     const double gigabytes = static_cast<double>(solver->capacity()) * (8 + 8 * Blueprint::maxActions) / 1e9;
     std::cerr << "public nodes " << nodes[0] << '/' << nodes[1] << '/' << nodes[2] << '/' << nodes[3]
               << ", infoset bound " << bound << ", table " << solver->capacity() << " slots (" << gigabytes << " GB)\n";
