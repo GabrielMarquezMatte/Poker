@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -37,16 +38,38 @@ static void printOpenings(const Mccfr<Blueprint> &solver)
 
 int main(int argc, char **argv)
 {
-    if (argc < 3)
+    std::map<std::string, double> options{{"--minutes", 60.0},
+                                          {"--threads", static_cast<double>(std::thread::hardware_concurrency())},
+                                          {"--block-seconds", 60.0},
+                                          {"--checkpoint-blocks", 10.0},
+                                          {"--prune-threshold", 0.0},
+                                          {"--prune-after-blocks", 10.0}};
+    bool valid = argc >= 3 && argc % 2 == 1;
+    for (int i = 3; valid && i + 1 < argc; i += 2)
     {
-        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin> [minutes=60] [threads=all] [block seconds=60] [checkpoint every N blocks=10]\n";
+        valid = options.contains(argv[i]);
+        if (valid)
+        {
+            options[argv[i]] = std::stod(argv[i + 1]);
+        }
+    }
+    if (!valid)
+    {
+        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin>";
+        for (const auto &[name, value] : options)
+        {
+            std::cerr << " [" << name << ' ' << value << ']';
+        }
+        std::cerr << "\n  --prune-threshold < 0 enables regret-based pruning once the blueprint has --prune-after-blocks blocks\n";
         return 1;
     }
     const std::string blueprintPath = argv[2];
-    const double minutes = argc > 3 ? std::stod(argv[3]) : 60.0;
-    const std::size_t threads = argc > 4 ? std::stoull(argv[4]) : std::thread::hardware_concurrency();
-    const double blockSeconds = argc > 5 ? std::stod(argv[5]) : 60.0;
-    const std::uint64_t checkpointBlocks = argc > 6 ? std::stoull(argv[6]) : 10;
+    const double minutes = options["--minutes"];
+    const std::size_t threads = static_cast<std::size_t>(options["--threads"]);
+    const double blockSeconds = options["--block-seconds"];
+    const std::uint64_t checkpointBlocks = static_cast<std::uint64_t>(options["--checkpoint-blocks"]);
+    const float pruneThreshold = static_cast<float>(options["--prune-threshold"]);
+    const std::uint64_t pruneAfterBlocks = static_cast<std::uint64_t>(options["--prune-after-blocks"]);
 
     const auto abstraction = std::make_unique<CardAbstraction>();
     if (!abstraction->load(argv[1]))
@@ -85,8 +108,16 @@ int main(int argc, char **argv)
     const Clock::time_point start = Clock::now();
     const Clock::time_point deadline = start + seconds(minutes * 60);
     std::random_device seeds;
+    bool pruning = false;
     for (std::uint64_t block = 1; std::chrono::steady_clock::now() < deadline; ++block)
     {
+        // >= so a resumed run past the warm-up prunes from its first block.
+        if (pruneThreshold < 0.0f && solver->discounts() >= pruneAfterBlocks && !pruning)
+        {
+            solver->enablePruning(pruneThreshold);
+            pruning = true;
+            std::cerr << "pruning enabled (threshold " << pruneThreshold << ")\n";
+        }
         const std::uint64_t before = solver->iterations();
         const auto blockStart = std::chrono::steady_clock::now();
         {

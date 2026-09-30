@@ -111,3 +111,23 @@ TEST(PushFold, SolverConvergesToLowExploitability)
     EXPECT_GE(e.mbbPerHand(), 0.0);
     EXPECT_LT(e.mbbPerHand(), 10.0);
 }
+
+TEST(PushFold, SolverWithPruningConvergesToLowExploitability)
+{
+    if (exactEquity() == nullptr)
+    {
+        GTEST_SKIP();
+    }
+    Mccfr<PushFold> solver(1024);
+    CfrRng rng{42};
+    for (std::uint64_t t = 1; t <= 100; ++t)
+    {
+        if (t == 10)
+        {
+            solver.enablePruning(-2000.0f);
+        }
+        solver.train(20'000, rng);
+        solver.discount(static_cast<float>(t) / static_cast<float>(t + 1));
+    }
+    EXPECT_LT(pushFoldExploitability(*exactEquity(), pushFoldStrategy(solver)).mbbPerHand(), 10.0);
+}

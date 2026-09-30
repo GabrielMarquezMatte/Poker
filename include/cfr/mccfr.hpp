@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <immintrin.h>
 #include <memory>
 #include <string>
@@ -38,6 +39,7 @@ concept CfrGame = requires(const typename G::State &s, std::size_t action, std::
 // train() may run concurrently from several threads: keys are claimed with CAS and values are
 // updated with relaxed loads/stores, so racing updates can be lost but never tear (as in Pluribus).
 // Linear CFR is applied in blocks: call discount(t / (t + 1)) after block t, with no training running.
+// Optional regret-based pruning (Pluribus MCCFR-P): see enablePruning.
 template <CfrGame G>
 class Mccfr
 {
@@ -52,10 +54,21 @@ public:
         {
             for (std::size_t p = 0; p < G::numPlayers; ++p)
             {
-                traverse(G::initial(), p, rng);
+                const bool prune = m_pruneThreshold < 0.0f && uniform(rng) < m_pruneProbability;
+                traverse(G::initial(), p, rng, prune);
             }
         }
         m_iterations.fetch_add(iterations, std::memory_order_relaxed);
+    }
+
+    // In `probability` of traversals the traverser skips actions whose regret is below `threshold` (< 0);
+    // the rest explore everything so pruned actions can recover. Regrets are then floored slightly below
+    // the threshold (Pluribus: threshold -300M, floor -310M). Not safe while training.
+    void enablePruning(float threshold, double probability = 0.95) noexcept
+    {
+        m_pruneThreshold = threshold;
+        m_regretFloor = threshold * (310.0f / 300.0f);
+        m_pruneProbability = probability;
     }
 
     void discount(float factor) noexcept
@@ -139,6 +152,9 @@ private:
     std::atomic<std::size_t> m_used{0};
     std::atomic<std::uint64_t> m_iterations{0};
     std::uint64_t m_discounts = 0;
+    float m_pruneThreshold = 0.0f; // 0 disables pruning
+    float m_regretFloor = -std::numeric_limits<float>::infinity();
+    double m_pruneProbability = 0.0;
 
     // Slots hold a bijective mix of the game key (spreads small keys like Kuhn's); 0 marks an empty slot,
     // so the single key mixing to 0 shares a slot with the one mixing to 1 (probability 2^-64).
@@ -196,11 +212,13 @@ private:
         return out;
     }
 
-    static inline void add(float &target, double delta) noexcept
+    static inline void add(float &target, double delta, float floor = -std::numeric_limits<float>::infinity()) noexcept
     {
         std::atomic_ref<float> ref(target);
-        ref.store(ref.load(std::memory_order_relaxed) + static_cast<float>(delta), std::memory_order_relaxed);
+        ref.store(std::max(ref.load(std::memory_order_relaxed) + static_cast<float>(delta), floor), std::memory_order_relaxed);
     }
+
+    static inline double uniform(CfrRng &rng) noexcept { return static_cast<double>(rng() >> 11) * 0x1.0p-53; }
 
     // Positive part normalized; uniform when nothing is positive. Serves as regret matching and averaging.
     static inline Strategy normalize(const Values &values, std::size_t n) noexcept
@@ -220,7 +238,7 @@ private:
 
     static inline std::size_t sample(const Strategy &sigma, std::size_t n, CfrRng &rng) noexcept
     {
-        double r = static_cast<double>(rng() >> 11) * 0x1.0p-53;
+        double r = uniform(rng);
         for (std::size_t a = 0; a + 1 < n; ++a)
         {
             r -= sigma[a];
@@ -240,7 +258,7 @@ private:
         }
     }
 
-    double traverse(const typename G::State &s, std::size_t traverser, CfrRng &rng)
+    double traverse(const typename G::State &s, std::size_t traverser, CfrRng &rng, bool prune)
     {
         if (G::isTerminal(s))
         {
@@ -248,36 +266,54 @@ private:
         }
         if (G::isChance(s))
         {
-            return traverse(G::sampleChance(s, rng), traverser, rng);
+            return traverse(G::sampleChance(s, rng), traverser, rng, prune);
         }
         const std::size_t n = G::numActions(s);
         Slot &slot = findOrInsert(storedKey(G::infosetKey(s)));
-        const Strategy sigma = normalize(load(slot.regret), n);
+        const Values regrets = load(slot.regret);
+        const Strategy sigma = normalize(regrets, n);
         if (G::currentPlayer(s) != traverser)
         {
             for (std::size_t a = 0; a < n; ++a)
             {
                 add(slot.strategy[a], sigma[a]);
             }
-            return traverse(G::apply(s, sample(sigma, n, rng)), traverser, rng);
+            return traverse(G::apply(s, sample(sigma, n, rng)), traverser, rng, prune);
         }
-        // Build every child first and prefetch their slots so the table misses overlap.
+        std::array<bool, G::maxActions> explored{};
+        bool any = false;
+        for (std::size_t a = 0; a < n; ++a)
+        {
+            explored[a] = !prune || regrets[a] > m_pruneThreshold;
+            any = any || explored[a];
+        }
+        // Build every explored child first and prefetch their slots so the table misses overlap.
         std::array<typename G::State, G::maxActions> children;
         for (std::size_t a = 0; a < n; ++a)
         {
-            children[a] = G::apply(s, a);
-            prefetch(children[a]);
+            explored[a] = explored[a] || !any;
+            if (explored[a])
+            {
+                children[a] = G::apply(s, a);
+                prefetch(children[a]);
+            }
         }
         Strategy values{};
         double nodeValue = 0.0;
         for (std::size_t a = 0; a < n; ++a)
         {
-            values[a] = traverse(children[a], traverser, rng);
-            nodeValue += sigma[a] * values[a];
+            if (explored[a])
+            {
+                values[a] = traverse(children[a], traverser, rng, prune);
+                nodeValue += sigma[a] * values[a];
+            }
         }
         for (std::size_t a = 0; a < n; ++a)
         {
-            add(slot.regret[a], values[a] - nodeValue);
+            if (explored[a])
+            {
+                add(slot.regret[a], values[a] - nodeValue, m_regretFloor);
+            }
         }
         return nodeValue;
     }
