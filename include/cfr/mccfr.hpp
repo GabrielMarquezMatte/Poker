@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <immintrin.h>
 #include <memory>
 #include <string>
 
@@ -231,6 +232,14 @@ private:
         return n - 1;
     }
 
+    inline void prefetch(const typename G::State &s) const noexcept
+    {
+        if (!G::isTerminal(s) && !G::isChance(s))
+        {
+            _mm_prefetch(reinterpret_cast<const char *>(&m_slots[storedKey(G::infosetKey(s)) & m_mask]), _MM_HINT_T0);
+        }
+    }
+
     double traverse(const typename G::State &s, std::size_t traverser, CfrRng &rng)
     {
         if (G::isTerminal(s))
@@ -252,11 +261,18 @@ private:
             }
             return traverse(G::apply(s, sample(sigma, n, rng)), traverser, rng);
         }
+        // Build every child first and prefetch their slots so the table misses overlap.
+        std::array<typename G::State, G::maxActions> children;
+        for (std::size_t a = 0; a < n; ++a)
+        {
+            children[a] = G::apply(s, a);
+            prefetch(children[a]);
+        }
         Strategy values{};
         double nodeValue = 0.0;
         for (std::size_t a = 0; a < n; ++a)
         {
-            values[a] = traverse(G::apply(s, a), traverser, rng);
+            values[a] = traverse(children[a], traverser, rng);
             nodeValue += sigma[a] * values[a];
         }
         for (std::size_t a = 0; a < n; ++a)
