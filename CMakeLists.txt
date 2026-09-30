@@ -36,6 +36,9 @@ target_link_libraries(${PROJECT_NAME}_Game PRIVATE bshoshany-thread-pool::bshosh
 add_executable(${PROJECT_NAME}_PreflopTable src/generate_preflop_table.cpp)
 target_link_libraries(${PROJECT_NAME}_PreflopTable PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
 
+add_executable(${PROJECT_NAME}_Abstraction src/generate_abstraction.cpp)
+target_link_libraries(${PROJECT_NAME}_Abstraction PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
+
 add_executable(${PROJECT_NAME}_Benchmark src/benchmarks.cpp)
 target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark benchmark::benchmark_main bshoshany-thread-pool::bshoshany-thread-pool)
 

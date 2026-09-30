@@ -515,3 +515,5 @@ FodyWeavers.xsd
 *.db*
 **/keys/
 **/build/
+# Generated abstraction tables and blueprints
+data/
