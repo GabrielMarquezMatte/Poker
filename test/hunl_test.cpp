@@ -1,5 +1,6 @@
 #include "../include/cfr/hunl.hpp"
 #include <cmath>
+#include <memory>
 #include <gtest/gtest.h>
 
 using Nl = Hunl<Hunl100bbConfig>;
@@ -7,9 +8,11 @@ static_assert(CfrGame<Nl>);
 
 static std::uint64_t cards(std::string_view s) { return Deck::parseHand(s).getMask(); }
 
-static Nl::State dealt(std::string_view sb, std::string_view bb)
+// Fixed runout 4s 5s 6h | Tc | Jd, disjoint from every hole used below.
+template <typename G = Nl>
+static typename G::State dealt(std::string_view sb, std::string_view bb)
 {
-    return Nl::withHoles(Nl::initial(), cards(sb), cards(bb));
+    return G::deal(G::initial(), cards(sb), cards(bb), cards("4s 5s 6h"), cards("Tc"), cards("Jd"));
 }
 
 // Index of the action whose target investment is `to`.
@@ -73,8 +76,7 @@ TEST(Hunl, LimpCheckDealsFlopWithBigBlindFirst)
     ASSERT_TRUE(Nl::isChance(s));
     CfrRng rng{1};
     s = Nl::sampleChance(s, rng);
-    EXPECT_EQ(std::popcount(s.board), 3);
-    EXPECT_EQ(s.board & (s.hole[0] | s.hole[1]), 0u);
+    EXPECT_EQ(s.board, cards("4s 5s 6h"));
     EXPECT_EQ(Nl::currentPlayer(s), 1u);
     EXPECT_FALSE(Nl::isChance(s));
     EXPECT_FALSE(Nl::isTerminal(s));
@@ -91,9 +93,9 @@ TEST(Hunl, AllInCallRunsOutToShowdown)
         ASSERT_TRUE(Nl::isChance(s));
         s = Nl::sampleChance(s, rng);
     }
-    EXPECT_EQ(std::popcount(s.board), 5);
-    const double u = Nl::utility(s, 0);
-    EXPECT_TRUE(u == 200.0 || u == -200.0 || u == 0.0);
+    EXPECT_EQ(s.board, cards("4s 5s 6h Tc Jd"));
+    EXPECT_EQ(Nl::utility(s, 0), 200.0); // aces hold
+    EXPECT_EQ(Nl::utility(s, 1), -200.0);
 }
 
 TEST(Hunl, RandomPlayoutsAreZeroSumAndBounded)
@@ -116,6 +118,7 @@ TEST(Hunl, RandomPlayoutsAreZeroSumAndBounded)
             ASSERT_LE(n, Nl::maxActions);
             s = Nl::apply(s, rng() % n);
         }
+        ASSERT_EQ(std::popcount(s.hole[0] | s.hole[1] | s.runout[0] | s.runout[1] | s.runout[2]), 9);
         const double u0 = Nl::utility(s, 0);
         EXPECT_EQ(u0 + Nl::utility(s, 1), 0.0);
         EXPECT_LE(std::abs(u0), 200.0);
@@ -124,7 +127,7 @@ TEST(Hunl, RandomPlayoutsAreZeroSumAndBounded)
 
 TEST(Hunl, TrainsOnFullTree)
 {
-    Mccfr<Nl> solver;
+    Mccfr<Nl> solver(1 << 20);
     CfrRng rng{5};
     solver.train(2'000, rng);
     EXPECT_GT(solver.numInfosets(), 1000u);
@@ -134,34 +137,34 @@ TEST(Hunl, TrainsOnFullTree)
 struct PushFold20bb : Hunl100bbConfig
 {
     static constexpr std::uint32_t stack = 40;
-    static constexpr std::array<double, 0> raiseFractions{};
-    static constexpr std::uint8_t maxRaisesPerStreet = 1;
+    static constexpr std::array<std::array<double, 0>, 4> raiseFractions{};
+    static constexpr std::array<std::uint8_t, 4> maxRaises{1, 1, 1, 1};
     static constexpr bool allowLimp = false;
 };
 using Pf = Hunl<PushFold20bb>;
 
 static const Mccfr<Pf> &trainedPushFold()
 {
-    static const Mccfr<Pf> solver = []
+    static const auto solver = []
     {
-        Mccfr<Pf> s;
+        auto s = std::make_unique<Mccfr<Pf>>(1024);
         CfrRng rng{42};
-        s.train(2'000'000, rng);
+        trainLinear(*s, 100, 20'000, rng);
         return s;
     }();
-    return solver;
+    return *solver;
 }
 
 // Opponent cards never enter the actor's infoset key.
 static double pushProb(std::string_view hole)
 {
-    const auto s = Pf::withHoles(Pf::initial(), cards(hole), cards("9h 8h"));
+    const auto s = dealt<Pf>(hole, "9h 8h");
     return trainedPushFold().averageStrategy(Pf::infosetKey(s), 2)[1];
 }
 
 static double callProb(std::string_view hole)
 {
-    auto s = Pf::withHoles(Pf::initial(), cards("9h 8h"), cards(hole));
+    auto s = dealt<Pf>("9h 8h", hole);
     s = Pf::apply(s, 1);
     return trainedPushFold().averageStrategy(Pf::infosetKey(s), 2)[1];
 }

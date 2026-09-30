@@ -6,7 +6,7 @@
 #include <bit>
 #include <cstdint>
 
-// 100bb heads-up with a 0.5/1/2 pot raise abstraction. Chips: small blind 1, big blind 2.
+// 100bb heads-up with a 0.5/1/2 pot raise abstraction on every street. Chips: small blind 1, big blind 2.
 // Postflop buckets here are the made-hand category (9 buckets): enough for tests and smoke runs.
 // Real training overrides postflopBucket with CardAbstraction::bucket.
 struct Hunl100bbConfig
@@ -14,8 +14,9 @@ struct Hunl100bbConfig
     static constexpr std::uint32_t stack = 200;
     static constexpr std::uint32_t smallBlind = 1;
     static constexpr std::uint32_t bigBlind = 2;
-    static constexpr std::array<double, 3> raiseFractions{0.5, 1.0, 2.0};
-    static constexpr std::uint8_t maxRaisesPerStreet = 3;
+    // Per street (preflop, flop, turn, river); 0 marks an unused slot.
+    static constexpr std::array<std::array<double, 3>, 4> raiseFractions{{{0.5, 1.0, 2.0}, {0.5, 1.0, 2.0}, {0.5, 1.0, 2.0}, {0.5, 1.0, 2.0}}};
+    static constexpr std::array<std::uint8_t, 4> maxRaises{3, 3, 3, 3};
     static constexpr bool allowLimp = true;
     static std::uint16_t postflopBucket(std::uint64_t hole, std::uint64_t board)
     {
@@ -30,7 +31,7 @@ template <typename C>
 struct Hunl
 {
     static constexpr std::size_t numPlayers = 2;
-    static constexpr std::size_t maxActions = 3 + C::raiseFractions.size();
+    static constexpr std::size_t maxActions = 3 + C::raiseFractions[0].size();
     static constexpr std::uint32_t fold = ~0u;
     static constexpr std::uint8_t nobody = 2;
     static constexpr std::uint8_t showdown = 4;
@@ -38,16 +39,18 @@ struct Hunl
     struct State
     {
         std::array<std::uint64_t, 2> hole{};
+        std::array<std::uint64_t, 3> runout{}; // flop, turn, river: dealt up front, revealed street by street
         std::uint64_t board = 0;
         std::uint64_t history = 0; // hash of the public action sequence
         std::array<std::uint32_t, 2> invested{C::smallBlind, C::bigBlind};
         std::uint32_t lastRaise = C::bigBlind;
-        std::array<std::uint16_t, 2> bucket{};
+        std::array<std::array<std::uint16_t, 2>, 4> bucket{}; // [street][player]
         std::uint8_t street = 0; // 0 preflop .. 3 river, 4 showdown (board runs out)
         std::uint8_t toAct = 0;
         std::uint8_t actions = 0; // this street
         std::uint8_t raises = 0;  // this street
         std::uint8_t folder = nobody;
+        std::int8_t winner = 0; // at showdown: 1 player 0 wins, -1 player 1 wins, 0 split
         bool dealt = false;
     };
 
@@ -60,15 +63,27 @@ struct Hunl
 
     static State initial() { return {}; }
 
-    static State withHoles(const State &s, std::uint64_t hole0, std::uint64_t hole1)
+    // All cards are dealt at once so buckets and the showdown are computed once per deal, not per visit.
+    static State deal(const State &s, std::uint64_t hole0, std::uint64_t hole1, std::uint64_t flop, std::uint64_t turn, std::uint64_t river)
     {
         State next = s;
         next.hole = {hole0, hole1};
+        next.runout = {flop, turn, river};
         next.dealt = true;
         for (std::size_t p = 0; p < 2; ++p)
         {
-            next.bucket[p] = static_cast<std::uint16_t>(preflopClassIndex(Deck::from_mask(next.hole[p])));
+            next.bucket[0][p] = static_cast<std::uint16_t>(preflopClassIndex(Deck::from_mask(next.hole[p])));
+            std::uint64_t board = 0;
+            for (std::size_t street = 1; street < 4; ++street)
+            {
+                board |= next.runout[street - 1];
+                next.bucket[street][p] = C::postflopBucket(next.hole[p], board);
+            }
         }
+        const std::uint64_t board = flop | turn | river;
+        const ClassificationResult first = Hand::classify(Deck::from_mask(hole0 | board));
+        const ClassificationResult second = Hand::classify(Deck::from_mask(hole1 | board));
+        next.winner = static_cast<std::int8_t>(first > second ? 1 : (first < second ? -1 : 0));
         return next;
     }
 
@@ -84,20 +99,19 @@ struct Hunl
 
     static State sampleChance(const State &s, CfrRng &rng)
     {
-        Deck deck = Deck::from_mask(Deck::createFullDeck().getMask() & ~(s.hole[0] | s.hole[1] | s.board));
         if (!s.dealt)
         {
+            Deck deck = Deck::createFullDeck();
             const std::uint64_t hole0 = deck.popPair(rng).getMask();
-            return withHoles(s, hole0, deck.popPair(rng).getMask());
+            const std::uint64_t hole1 = deck.popPair(rng).getMask();
+            const std::uint64_t flop = deck.popRandomCards(rng, 3).getMask();
+            const std::uint64_t turn = deck.popRandomCards(rng, 1).getMask();
+            return deal(s, hole0, hole1, flop, turn, deck.popRandomCards(rng, 1).getMask());
         }
         State next = s;
-        next.board |= deck.popRandomCards(rng, static_cast<std::size_t>(boardSize[s.street] - std::popcount(s.board))).getMask();
-        if (next.street != showdown)
+        for (std::size_t i = 0; i < std::min<std::size_t>(s.street, 3); ++i)
         {
-            for (std::size_t p = 0; p < 2; ++p)
-            {
-                next.bucket[p] = C::postflopBucket(next.hole[p], next.board);
-            }
+            next.board |= s.runout[i];
         }
         return next;
     }
@@ -109,19 +123,18 @@ struct Hunl
         {
             return s.folder == player ? -static_cast<double>(s.invested[player]) : static_cast<double>(s.invested[opp]);
         }
-        const ClassificationResult mine = Hand::classify(Deck::from_mask(s.hole[player] | s.board));
-        const ClassificationResult theirs = Hand::classify(Deck::from_mask(s.hole[opp] | s.board));
-        if (mine == theirs)
+        const int result = player == 0 ? s.winner : -s.winner;
+        if (result == 0)
         {
             return 0.0;
         }
-        return mine > theirs ? static_cast<double>(s.invested[opp]) : -static_cast<double>(s.invested[player]);
+        return result > 0 ? static_cast<double>(s.invested[opp]) : -static_cast<double>(s.invested[player]);
     }
 
     static std::size_t currentPlayer(const State &s) { return s.toAct; }
     static std::size_t numActions(const State &s) { return legalActions(s).size; }
 
-    static std::uint64_t infosetKey(const State &s) { return mix(s.history, s.bucket[s.toAct]); }
+    static std::uint64_t infosetKey(const State &s) { return mix(s.history, s.bucket[s.street][s.toAct]); }
 
     static Actions legalActions(const State &s)
     {
@@ -136,13 +149,13 @@ struct Hunl
         {
             out.to[out.size++] = facing;
         }
-        if (s.raises >= C::maxRaisesPerStreet || facing >= C::stack)
+        if (s.raises >= C::maxRaises[s.street] || facing >= C::stack)
         {
             return out;
         }
         const std::uint32_t potAfterCall = 2 * facing;
-        std::uint32_t last = facing + s.lastRaise - 1; // below this is not a legal raise
-        for (const double fraction : C::raiseFractions)
+        std::uint32_t last = facing + s.lastRaise - 1; // below this is not a legal raise; also skips 0 slots
+        for (const double fraction : C::raiseFractions[s.street])
         {
             const std::uint32_t to = facing + static_cast<std::uint32_t>(fraction * potAfterCall);
             if (to > last && to < C::stack)

@@ -3,10 +3,16 @@
 #include "../random.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <bit>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <unordered_map>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <string>
 
 using CfrRng = omp::XoroShiro128Plus;
 
@@ -27,57 +33,186 @@ concept CfrGame = requires(const typename G::State &s, std::size_t action, std::
     { G::infosetKey(s) } -> std::same_as<std::uint64_t>;
 };
 
-// External-sampling MCCFR with Linear CFR weighting (iteration t weighs regrets and strategy by t).
+// External-sampling MCCFR over a fixed-capacity open-addressing table of float regrets.
+// train() may run concurrently from several threads: keys are claimed with CAS and values are
+// updated with relaxed loads/stores, so racing updates can be lost but never tear (as in Pluribus).
+// Linear CFR is applied in blocks: call discount(t / (t + 1)) after block t, with no training running.
 template <CfrGame G>
 class Mccfr
 {
 public:
     using Strategy = std::array<double, G::maxActions>;
-    struct Node
-    {
-        Strategy regretSum{};
-        Strategy strategySum{};
-    };
 
-    inline void train(std::uint64_t iterations, CfrRng &rng)
+    explicit Mccfr(std::size_t capacity) : m_mask(std::bit_ceil(capacity) - 1), m_slots(std::make_unique<Slot[]>(m_mask + 1)) {}
+
+    void train(std::uint64_t iterations, CfrRng &rng)
     {
         for (std::uint64_t i = 0; i < iterations; ++i)
         {
-            ++m_iteration;
             for (std::size_t p = 0; p < G::numPlayers; ++p)
             {
                 traverse(G::initial(), p, rng);
             }
         }
+        m_iterations.fetch_add(iterations, std::memory_order_relaxed);
     }
 
-    // Uniform for infosets never visited.
-    inline Strategy averageStrategy(std::uint64_t key, std::size_t numActions) const
+    void discount(float factor) noexcept
     {
-        const auto it = m_nodes.find(key);
-        return normalize(it == m_nodes.end() ? Strategy{} : it->second.strategySum, numActions);
+        ++m_discounts;
+        for (std::size_t i = 0; i <= m_mask; ++i)
+        {
+            for (std::size_t a = 0; a < G::maxActions; ++a)
+            {
+                m_slots[i].regret[a] *= factor;
+                m_slots[i].strategy[a] *= factor;
+            }
+        }
     }
 
-    inline std::size_t numInfosets() const noexcept { return m_nodes.size(); }
-    inline std::uint64_t iterations() const noexcept { return m_iteration; }
+    // Average strategy; uniform for infosets never visited.
+    Strategy averageStrategy(std::uint64_t key, std::size_t numActions) const noexcept
+    {
+        const Slot *slot = find(key);
+        return normalize(slot == nullptr ? std::array<float, G::maxActions>{} : load(slot->strategy), numActions);
+    }
+
+    inline std::size_t numInfosets() const noexcept { return m_used.load(std::memory_order_relaxed); }
+    inline std::size_t capacity() const noexcept { return m_mask + 1; }
+    inline std::uint64_t iterations() const noexcept { return m_iterations.load(std::memory_order_relaxed); }
+    inline std::uint64_t discounts() const noexcept { return m_discounts; }
+
+    // Occupied slots only. Not safe while training.
+    bool save(const std::string &path) const
+    {
+        std::ofstream out(path, std::ios::binary);
+        const std::uint64_t header[4] = {G::maxActions, numInfosets(), iterations(), m_discounts};
+        out.write(reinterpret_cast<const char *>(header), sizeof(header));
+        for (std::size_t i = 0; i <= m_mask; ++i)
+        {
+            const std::uint64_t key = m_slots[i].key.load(std::memory_order_relaxed);
+            if (key != empty)
+            {
+                out.write(reinterpret_cast<const char *>(&key), sizeof(key));
+                out.write(reinterpret_cast<const char *>(m_slots[i].regret.data()), sizeof(m_slots[i].regret));
+                out.write(reinterpret_cast<const char *>(m_slots[i].strategy.data()), sizeof(m_slots[i].strategy));
+            }
+        }
+        return static_cast<bool>(out);
+    }
+
+    bool load(const std::string &path)
+    {
+        std::ifstream in(path, std::ios::binary);
+        std::uint64_t header[4]{};
+        in.read(reinterpret_cast<char *>(header), sizeof(header));
+        if (!in || header[0] != G::maxActions)
+        {
+            return false;
+        }
+        for (std::uint64_t n = 0; n < header[1]; ++n)
+        {
+            std::uint64_t key = 0;
+            in.read(reinterpret_cast<char *>(&key), sizeof(key));
+            Slot &slot = findOrInsert(key);
+            in.read(reinterpret_cast<char *>(slot.regret.data()), sizeof(slot.regret));
+            in.read(reinterpret_cast<char *>(slot.strategy.data()), sizeof(slot.strategy));
+        }
+        m_iterations.store(header[2], std::memory_order_relaxed);
+        m_discounts = header[3];
+        return static_cast<bool>(in);
+    }
 
 private:
-    // ponytail: unordered_map + double arrays; switch to a flat hash table / float when NLHE memory matters.
-    std::unordered_map<std::uint64_t, Node> m_nodes;
-    std::uint64_t m_iteration = 0;
+    static constexpr std::uint64_t empty = 0;
+    using Values = std::array<float, G::maxActions>;
+    struct Slot
+    {
+        std::atomic<std::uint64_t> key{empty};
+        Values regret{};
+        Values strategy{};
+    };
+
+    std::size_t m_mask;
+    std::unique_ptr<Slot[]> m_slots;
+    std::atomic<std::size_t> m_used{0};
+    std::atomic<std::uint64_t> m_iterations{0};
+    std::uint64_t m_discounts = 0;
+
+    // Slots hold a bijective mix of the game key (spreads small keys like Kuhn's); 0 marks an empty slot,
+    // so the single key mixing to 0 shares a slot with the one mixing to 1 (probability 2^-64).
+    static inline std::uint64_t storedKey(std::uint64_t key) noexcept
+    {
+        const std::uint64_t mixed = omp::splitmix64(key);
+        return mixed == empty ? 1 : mixed;
+    }
+
+    const Slot *find(std::uint64_t gameKey) const noexcept
+    {
+        const std::uint64_t key = storedKey(gameKey);
+        for (std::size_t i = key & m_mask, probes = 0; probes <= m_mask; i = (i + 1) & m_mask, ++probes)
+        {
+            const std::uint64_t k = m_slots[i].key.load(std::memory_order_acquire);
+            if (k == key)
+            {
+                return &m_slots[i];
+            }
+            if (k == empty)
+            {
+                return nullptr;
+            }
+        }
+        return nullptr;
+    }
+
+    // Takes a stored (already mixed) key.
+    Slot &findOrInsert(std::uint64_t key)
+    {
+        for (std::size_t i = key & m_mask, probes = 0; probes <= m_mask; i = (i + 1) & m_mask, ++probes)
+        {
+            std::uint64_t k = m_slots[i].key.load(std::memory_order_acquire);
+            if (k == empty && m_slots[i].key.compare_exchange_strong(k, key, std::memory_order_acq_rel))
+            {
+                m_used.fetch_add(1, std::memory_order_relaxed);
+                return m_slots[i];
+            }
+            if (k == key)
+            {
+                return m_slots[i];
+            }
+        }
+        std::fputs("Mccfr: infoset table full, raise capacity\n", stderr);
+        std::abort();
+    }
+
+    static inline Values load(const Values &values) noexcept
+    {
+        Values out{};
+        for (std::size_t a = 0; a < G::maxActions; ++a)
+        {
+            out[a] = std::atomic_ref<float>(const_cast<float &>(values[a])).load(std::memory_order_relaxed);
+        }
+        return out;
+    }
+
+    static inline void add(float &target, double delta) noexcept
+    {
+        std::atomic_ref<float> ref(target);
+        ref.store(ref.load(std::memory_order_relaxed) + static_cast<float>(delta), std::memory_order_relaxed);
+    }
 
     // Positive part normalized; uniform when nothing is positive. Serves as regret matching and averaging.
-    static inline Strategy normalize(const Strategy &values, std::size_t n) noexcept
+    static inline Strategy normalize(const Values &values, std::size_t n) noexcept
     {
         Strategy out{};
         double total = 0.0;
         for (std::size_t a = 0; a < n; ++a)
         {
-            total += std::max(values[a], 0.0);
+            total += std::max(values[a], 0.0f);
         }
         for (std::size_t a = 0; a < n; ++a)
         {
-            out[a] = total > 0.0 ? std::max(values[a], 0.0) / total : 1.0 / static_cast<double>(n);
+            out[a] = total > 0.0 ? std::max(values[a], 0.0f) / total : 1.0 / static_cast<double>(n);
         }
         return out;
     }
@@ -107,14 +242,13 @@ private:
             return traverse(G::sampleChance(s, rng), traverser, rng);
         }
         const std::size_t n = G::numActions(s);
-        Node &node = m_nodes[G::infosetKey(s)]; // references survive rehash
-        const Strategy sigma = normalize(node.regretSum, n);
-        const double weight = static_cast<double>(m_iteration);
+        Slot &slot = findOrInsert(storedKey(G::infosetKey(s)));
+        const Strategy sigma = normalize(load(slot.regret), n);
         if (G::currentPlayer(s) != traverser)
         {
             for (std::size_t a = 0; a < n; ++a)
             {
-                node.strategySum[a] += weight * sigma[a];
+                add(slot.strategy[a], sigma[a]);
             }
             return traverse(G::apply(s, sample(sigma, n, rng)), traverser, rng);
         }
@@ -127,9 +261,20 @@ private:
         }
         for (std::size_t a = 0; a < n; ++a)
         {
-            node.regretSum[a] += weight * (values[a] - nodeValue);
+            add(slot.regret[a], values[a] - nodeValue);
         }
         return nodeValue;
     }
 };
+
+// Single-threaded Linear CFR: `blocks` blocks of `perBlock` iterations, discounting after each.
+template <CfrGame G>
+void trainLinear(Mccfr<G> &solver, std::uint64_t blocks, std::uint64_t perBlock, CfrRng &rng)
+{
+    for (std::uint64_t t = 1; t <= blocks; ++t)
+    {
+        solver.train(perBlock, rng);
+        solver.discount(static_cast<float>(t) / static_cast<float>(t + 1));
+    }
+}
 #endif // __POKER_CFR_MCCFR_HPP__

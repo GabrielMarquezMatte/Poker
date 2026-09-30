@@ -1,4 +1,8 @@
 #include "../include/cfr/mccfr.hpp"
+#include <filesystem>
+#include <memory>
+#include <thread>
+#include <vector>
 #include <gtest/gtest.h>
 
 // Kuhn poker: 3 cards (J=0, Q=1, K=2), ante 1, one bet of 1. Action 0 = pass (check/fold), 1 = bet (bet/call).
@@ -65,14 +69,14 @@ static_assert(CfrGame<Kuhn>);
 
 static const Mccfr<Kuhn> &trainedKuhn()
 {
-    static const Mccfr<Kuhn> solver = []
+    static const auto solver = []
     {
-        Mccfr<Kuhn> s;
+        auto s = std::make_unique<Mccfr<Kuhn>>(64);
         CfrRng rng{42};
-        s.train(300'000, rng);
+        trainLinear(*s, 100, 3'000, rng);
         return s;
     }();
-    return solver;
+    return *solver;
 }
 
 // Probability of action 1 (bet/call) holding `card` after `history` of `length` actions.
@@ -82,14 +86,31 @@ static double betProb(std::uint8_t card, std::uint8_t history, std::uint8_t leng
     return trainedKuhn().averageStrategy(Kuhn::infosetKey(s), 2)[1];
 }
 
-static double expectedValue(const Kuhn::State &s)
+static double expectedValue(const Mccfr<Kuhn> &solver, const Kuhn::State &s)
 {
     if (Kuhn::isTerminal(s))
     {
         return Kuhn::utility(s, 0);
     }
-    const auto sigma = trainedKuhn().averageStrategy(Kuhn::infosetKey(s), 2);
-    return sigma[0] * expectedValue(Kuhn::apply(s, 0)) + sigma[1] * expectedValue(Kuhn::apply(s, 1));
+    const auto sigma = solver.averageStrategy(Kuhn::infosetKey(s), 2);
+    return sigma[0] * expectedValue(solver, Kuhn::apply(s, 0)) + sigma[1] * expectedValue(solver, Kuhn::apply(s, 1));
+}
+
+// Player 0's value under both average strategies, exact over the 6 deals.
+static double gameValue(const Mccfr<Kuhn> &solver)
+{
+    double total = 0.0;
+    for (std::uint8_t c0 = 0; c0 < 3; ++c0)
+    {
+        for (std::uint8_t c1 = 0; c1 < 3; ++c1)
+        {
+            if (c0 != c1)
+            {
+                total += expectedValue(solver, Kuhn::State{{c0, c1}, 0, 0, true});
+            }
+        }
+    }
+    return total / 6.0;
 }
 
 TEST(MccfrKuhn, VisitsAllTwelveInfosets)
@@ -99,18 +120,39 @@ TEST(MccfrKuhn, VisitsAllTwelveInfosets)
 
 TEST(MccfrKuhn, ConvergesToGameValue)
 {
-    double total = 0.0;
-    for (std::uint8_t c0 = 0; c0 < 3; ++c0)
+    EXPECT_NEAR(gameValue(trainedKuhn()), -1.0 / 18.0, 5e-3);
+}
+
+TEST(MccfrKuhn, ConcurrentTrainingConverges)
+{
+    Mccfr<Kuhn> solver(64);
+    for (std::uint64_t t = 1; t <= 100; ++t)
     {
-        for (std::uint8_t c1 = 0; c1 < 3; ++c1)
+        std::vector<std::jthread> threads;
+        for (std::uint64_t i = 0; i < 4; ++i)
         {
-            if (c0 != c1)
-            {
-                total += expectedValue(Kuhn::State{{c0, c1}, 0, 0, true});
-            }
+            threads.emplace_back([&solver, seed = t * 4 + i]
+                                 {
+                CfrRng rng{seed};
+                solver.train(750, rng); });
         }
+        threads.clear();
+        solver.discount(static_cast<float>(t) / static_cast<float>(t + 1));
     }
-    EXPECT_NEAR(total / 6.0, -1.0 / 18.0, 5e-3);
+    EXPECT_EQ(solver.iterations(), 300'000u);
+    EXPECT_NEAR(gameValue(solver), -1.0 / 18.0, 5e-3);
+}
+
+TEST(MccfrKuhn, SaveLoadRoundTrips)
+{
+    const std::string path = (std::filesystem::temp_directory_path() / "mccfr_kuhn_test.bin").string();
+    ASSERT_TRUE(trainedKuhn().save(path));
+    Mccfr<Kuhn> loaded(64);
+    ASSERT_TRUE(loaded.load(path));
+    std::filesystem::remove(path);
+    EXPECT_EQ(loaded.numInfosets(), 12u);
+    EXPECT_EQ(loaded.iterations(), trainedKuhn().iterations());
+    EXPECT_EQ(gameValue(loaded), gameValue(trainedKuhn()));
 }
 
 TEST(MccfrKuhn, MatchesKnownEquilibriumFamily)
