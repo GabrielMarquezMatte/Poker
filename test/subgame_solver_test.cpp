@@ -198,3 +198,50 @@ TEST(SubgameSolver, CoarseRiverKeepsTurnActions)
     EXPECT_EQ(s.street, 3);
     EXPECT_LT(Coarse::numActions(coarse), Nl::numActions(s)); // the river is coarser
 }
+
+// No bets after the flop: sampled turn and river cards give, on average over samples, the values of
+// dealing every card.
+struct FlopCheckDown : Hunl100bbConfig
+{
+    static constexpr std::array<std::uint8_t, 4> maxRaises{3, 0, 0, 0};
+};
+
+TEST(SubgameSolver, SampledChanceIsUnbiased)
+{
+    using Cd = Hunl<FlopCheckDown>;
+    auto root = turnRoot<Cd>("2c 7d 9h Js", 20);
+    root.board = Deck::parseHand("2c 7d 9h").getMask();
+    root.street = 1;
+    CfrRng rng{9};
+    Hands reach{}, uniform{};
+    uniform.fill(1.0);
+    for (auto &r : reach)
+    {
+        r = static_cast<double>(rng() % 1000) / 1000.0;
+    }
+    SubgameSolver<FlopCheckDown> full(root, {uniform, reach});
+    const auto exact = full.bestResponseValues(0);
+    constexpr std::size_t samples = 40;
+    Hands average{};
+    for (std::size_t k = 0; k < samples; ++k)
+    {
+        root.history = 0x1234 + k; // reseeds the sample
+        SubgameSolver<FlopCheckDown> sampled(root, {uniform, reach}, true, 0.0, 10);
+        const auto values = sampled.bestResponseValues(0);
+        for (std::size_t h = 0; h < holeCombos; ++h)
+        {
+            average[h] += values[h] / samples;
+        }
+    }
+    double mass = 0.0;
+    for (const double r : reach)
+    {
+        mass += r;
+    }
+    double error = 0.0;
+    for (std::size_t h = 0; h < holeCombos; ++h)
+    {
+        error += std::abs(average[h] - exact[h]) / holeCombos;
+    }
+    EXPECT_LT(error, 0.02 * 20.0 * mass); // of the stake against the whole range: 0.8% here, 29% with a naive 1 / (sampled - 4) weight
+}

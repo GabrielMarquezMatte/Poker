@@ -17,8 +17,9 @@ public:
     using Strategy = typename Tree::Strategy;
 
     // See SubgameTree for the arguments.
-    SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0)
-        : m_tree(root, ranges, averageLaterStreets, minReach), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
+    SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
+                  std::size_t chanceSamples = 0)
+        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
     {
         m_scratch.resize(m_tree.depth + 1);
         for (auto &scratch : m_scratch)
@@ -210,8 +211,7 @@ private:
         return result;
     }
 
-    // Deals each child's card: hands holding it are not in the child's space, and every hand pair sees
-    // `children - 4` possible cards, equally likely.
+    // Deals each child's card, weighted by node.weight: hands holding it are not in the child's space.
     template <typename F>
     void chance(const Node &node, const float *__restrict reach, float *__restrict out, Scratch &scratch, F recurse) const
     {
@@ -237,7 +237,7 @@ private:
                 out[parent[j]] += childOut[j];
             }
         }
-        const float weight = 1.0f / static_cast<float>(node.children.size() - 4);
+        const float weight = node.weight;
         for (std::size_t i = 0; i < hands; ++i)
         {
             out[i] *= weight;
@@ -433,26 +433,37 @@ private:
     }
 };
 
-// The same game with a coarser river, for lookahead from the turn: a 0.75-pot bet or all-in, then
-// only fold or call. Earlier streets and action histories are unchanged.
-template <typename C>
-struct CoarseRiver : C
+// The same game with coarser betting from street `From` on, for lookahead: a 0.75-pot bet or all-in,
+// then only fold or call. Earlier streets and action histories are unchanged.
+template <typename C, std::size_t From>
+struct Coarse : C
 {
     static constexpr auto raiseFractions = []
     {
         auto fractions = C::raiseFractions;
-        fractions[3] = {};
-        if (!fractions[3].empty())
+        for (std::size_t street = From; street < 4; ++street)
         {
-            fractions[3][0] = 0.75;
+            fractions[street] = {};
+            if (!fractions[street].empty())
+            {
+                fractions[street][0] = 0.75;
+            }
         }
         return fractions;
     }();
     static constexpr auto maxRaises = []
     {
         auto raises = C::maxRaises;
-        raises[3] = std::min<std::uint8_t>(raises[3], 1);
+        for (std::size_t street = From; street < 4; ++street)
+        {
+            raises[street] = std::min<std::uint8_t>(raises[street], 1);
+        }
         return raises;
     }();
 };
+template <typename C>
+using CoarseRiver = Coarse<C, 3>; // lookahead from the turn
+template <typename C>
+using CoarseTurn = Coarse<C, 2>; // lookahead from the flop
+
 #endif // __POKER_CFR_SUBGAME_SOLVER_HPP__

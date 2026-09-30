@@ -17,6 +17,8 @@ int main(int argc, char **argv)
                                           {"--streets", 14.0}, // LBR's call-down assumption is poor preflop
                                           {"--river-iterations", 0.0},
                                           {"--turn-iterations", 0.0},
+                                          {"--flop-iterations", 0.0},
+                                          {"--flop-samples", 8.0},
                                           {"--gpu", 0.0}};
     bool valid = argc >= 4 && argc % 2 == 0;
     for (int i = 4; valid && i + 1 < argc; i += 2)
@@ -37,8 +39,9 @@ int main(int argc, char **argv)
         std::cerr << "\n  --hands is per LBR seat; --streets is a bitmask of where LBR deviates"
                      " (1 preflop, 2 flop, 4 turn, 8 river; 0 = self-play)\n"
                      "  --river-iterations > 0 evaluates the blueprint resolving each river with that many DCFR iterations,\n"
-                     "  --turn-iterations > 0 each turn (to showdown, with a coarser river)\n"
-                     "  --gpu 1 resolves turns on the first OpenCL GPU\n";
+                     "  --turn-iterations > 0 each turn (to showdown, with a coarser river),\n"
+                     "  --flop-iterations > 0 each flop (coarser turn and river, --flop-samples cards per chance node)\n"
+                     "  --gpu 1 resolves flops and turns on the first OpenCL GPU\n";
         return 1;
     }
 
@@ -71,10 +74,10 @@ int main(int argc, char **argv)
     }
     const auto run = [&]<template <typename> class Solver>()
     {
+        const LbrResolves resolves{static_cast<std::size_t>(options["--flop-iterations"]), static_cast<std::size_t>(options["--turn-iterations"]),
+                                   static_cast<std::size_t>(options["--river-iterations"]), static_cast<std::size_t>(options["--flop-samples"])};
         const LocalBestResponse<BlueprintConfig, Solver> lbr(*blueprint, *equity, static_cast<std::size_t>(options["--flop-runouts"]),
-                                                             static_cast<unsigned>(options["--streets"]),
-                                                             static_cast<std::size_t>(options["--river-iterations"]),
-                                                             static_cast<std::size_t>(options["--turn-iterations"]));
+                                                             static_cast<unsigned>(options["--streets"]), resolves);
         return lbr.evaluate(static_cast<std::uint64_t>(options["--hands"]), static_cast<std::size_t>(options["--threads"]),
                             static_cast<std::uint64_t>(options["--seed"]));
     };

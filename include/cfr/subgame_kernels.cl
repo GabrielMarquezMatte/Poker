@@ -22,6 +22,7 @@ typedef struct
     uint hands;
     uint firstChild; // children are contiguous
     uint invested;   // player 0 in the low half, player 1 in the high half
+    float weight;    // chance: each child's probability for a hand pair
     uchar kind, toAct, children, folder;
 } Node;
 
@@ -220,7 +221,7 @@ __kernel void backward(__global const Node *nodes, __global const uint *ids, uin
             const uint j = inverse[spaceInverse[child.space] + i];
             out += j != NO_HAND ? vec[child.vec + j] : 0.0f;
         }
-        vec[node.vec + i] = out / (float)(n - 4);
+        vec[node.vec + i] = out * node.weight;
         return;
     }
     if (node.toAct != p)

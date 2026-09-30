@@ -17,13 +17,24 @@ struct LbrResult
     inline double averageError() const noexcept { return std::hypot(standardError[0], standardError[1]) / 2.0; }
 };
 
+// Which streets the evaluated strategy resolves, and with how many DCFR iterations (0 = play the
+// blueprint there). Each resolve starts from the ranges the strategy implies so far and solves to
+// showdown: rivers exactly, turns with a coarser river (CoarseRiver), flops with coarser turn and river
+// betting (CoarseTurn) dealing only `flopSamples` cards at each chance node. Later streets are resolved
+// again when reached.
+struct LbrResolves
+{
+    std::size_t flop = 0, turn = 0, river = 0;
+    std::size_t flopSamples = 8;
+};
+
 // Local best response (Lisy & Bowling 2017): plays real hands against a strategy's average policy,
 // tracking the opponent's range, and at each decision picks the action with the best value assuming
 // both players then check/call to showdown. Its winnings lower-bound the strategy's exploitability.
 // It uses the game's own bet sizes, so it never leaves the strategy's betting tree.
-// Turns are resolved with `TurnResolver`: SubgameSolver on the CPU, or GpuSubgameSolver. Rivers always use
-// SubgameSolver (their trees are too small for the GPU to win).
-template <typename C, template <typename> class TurnResolver = SubgameSolver>
+// Flops and turns are resolved with `Resolver`: SubgameSolver on the CPU, or GpuSubgameSolver. Rivers
+// always use SubgameSolver (their trees are too small for the GPU to win).
+template <typename C, template <typename> class Resolver = SubgameSolver>
 class LocalBestResponse
 {
 public:
@@ -35,14 +46,10 @@ public:
     // Flop equities average `flopRunouts` sampled turn/river pairs; turn and river are exact.
     // LBR best-responds only on streets in `streets` (bit 0 preflop .. bit 3 river) and plays the
     // strategy itself elsewhere, which splits exploitability by street (0 = self-play).
-    // `riverIterations` > 0 makes the strategy resolve each river with SubgameSolver (that many DCFR
-    // iterations) from the ranges it implies, instead of playing the blueprint there. `turnIterations` > 0
-    // does the same on the turn, solving to showdown with a coarser river (CoarseRiver); the river is
-    // then resolved again, if enabled, from the ranges the turn solution implies.
+    // `resolves` says where the strategy resolves instead of playing its blueprint.
     LocalBestResponse(const Mccfr<G> &opponent, const PreflopEquity &preflop, std::size_t flopRunouts = 100, unsigned streets = allStreets,
-                      std::size_t riverIterations = 0, std::size_t turnIterations = 0)
-        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts), m_streets(streets), m_riverIterations(riverIterations),
-          m_turnIterations(turnIterations) {}
+                      LbrResolves resolves = {})
+        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts), m_streets(streets), m_resolves(resolves) {}
 
     // LBR's winnings in chips for one hand played from `seat` (0 small blind, 1 big blind).
     double playHand(std::size_t seat, CfrRng &rng) const
@@ -50,7 +57,7 @@ public:
         typename G::State s = G::sampleChance(G::initial(), rng);
         const std::size_t opp = 1 - seat;
         const std::uint64_t hero = s.hole[seat];
-        const bool resolving = m_riverIterations > 0 || m_turnIterations > 0;
+        const bool resolving = m_resolves.flop > 0 || m_resolves.turn > 0 || m_resolves.river > 0;
         // range: the opponent's hands as LBR sees them. beliefs: LBR's hands as the opponent's strategy
         // sees them, which seeds its resolves.
         Range range{}, beliefs{};
@@ -83,17 +90,24 @@ public:
                 }
                 bucketStreet = s.street;
             }
-            if (m_turnIterations > 0 && s.street == 2 && solvers.turn == nullptr)
+            // The lookahead games share the state layout and the resolved street's betting. Averages are
+            // kept for that street only: later streets are resolved again.
+            if (m_resolves.flop > 0 && s.street == 1 && solvers.flop == nullptr)
             {
-                // Hunl<CoarseRiver<C>> shares the state layout and the turn's betting.
-                solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(s), resolveRanges(seat, range, beliefs),
-                                                            false, minReach); // the river is resolved again
-                solvers.turn->solve(m_turnIterations);
+                solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(s), resolveRanges(seat, range, beliefs), false,
+                                                            minReach, m_resolves.flopSamples);
+                solvers.flop->solve(m_resolves.flop);
             }
-            if (m_riverIterations > 0 && s.street == 3 && solvers.river == nullptr)
+            if (m_resolves.turn > 0 && s.street == 2 && solvers.turn == nullptr)
+            {
+                solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(s), resolveRanges(seat, range, beliefs), false,
+                                                            minReach);
+                solvers.turn->solve(m_resolves.turn);
+            }
+            if (m_resolves.river > 0 && s.street == 3 && solvers.river == nullptr)
             {
                 solvers.river = std::make_unique<SubgameSolver<C>>(s, resolveRanges(seat, range, beliefs));
-                solvers.river->solve(m_riverIterations);
+                solvers.river->solve(m_resolves.river);
             }
             const std::size_t n = G::numActions(s);
             std::size_t action = 0;
@@ -176,15 +190,17 @@ private:
     const PreflopEquity &m_preflop;
     std::size_t m_flopRunouts;
     unsigned m_streets;
-    std::size_t m_riverIterations;
-    std::size_t m_turnIterations;
+    LbrResolves m_resolves;
 
-    using TurnSolver = TurnResolver<CoarseRiver<C>>;
+    using FlopSolver = Resolver<CoarseTurn<C>>;
+    using TurnSolver = Resolver<CoarseRiver<C>>;
+    static_assert(sizeof(typename FlopSolver::G::State) == sizeof(typename G::State));
     static constexpr double minReach = 1e-3; // turn resolves leave out hands this unlikely for both players
     static_assert(sizeof(typename TurnSolver::G::State) == sizeof(typename G::State));
     // The strategy's resolves in the current hand, if any.
     struct Solvers
     {
+        std::unique_ptr<FlopSolver> flop;
         std::unique_ptr<TurnSolver> turn;
         std::unique_ptr<SubgameSolver<C>> river;
     };
@@ -211,6 +227,10 @@ private:
         if (s.street == 2 && solvers.turn != nullptr && solvers.turn->contains(s))
         {
             return solvers.turn->strategy(s, hand);
+        }
+        if (s.street == 1 && solvers.flop != nullptr && solvers.flop->contains(s))
+        {
+            return solvers.flop->strategy(s, hand);
         }
         return m_opponent.averageStrategy(G::infosetKeyWithBucket(s, bucket), G::numActions(s));
     }

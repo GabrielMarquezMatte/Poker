@@ -37,6 +37,7 @@ struct SubgameTree
         std::size_t average = none; // decision: into the average strategy sums, if kept
         std::size_t space = 0;
         Kind kind = Kind::decision;
+        float weight = 0.0f; // chance: each child's probability for a hand pair (see build)
     };
     // The hands alive on one board, densely.
     struct Space
@@ -58,9 +59,12 @@ struct SubgameTree
 
     // `root` is a street's first decision; ranges[p] holds player p's reach for every hand. Hands whose
     // reach is at most `minReach` times the largest in both ranges are left out (they play uniformly).
-    // Average strategies are kept for root-street nodes only unless `averageLaterStreets`.
-    SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, bool averageLaterStreets = true, double minReach = 0.0)
-        : m_averageLaterStreets(averageLaterStreets)
+    // Average strategies are kept for root-street nodes only unless `averageLaterStreets`. With
+    // `chanceSamples` > 0, each chance node deals only that many cards, drawn at random (seeded by the
+    // board and history, so the tree is reproducible).
+    SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, bool averageLaterStreets = true, double minReach = 0.0,
+                std::size_t chanceSamples = 0)
+        : m_averageLaterStreets(averageLaterStreets), m_chanceSamples(chanceSamples)
     {
         const bool river = std::popcount(root.board) == 5;
         std::array<double, 2> floor{};
@@ -139,6 +143,7 @@ struct SubgameTree
 
 private:
     bool m_averageLaterStreets;
+    std::size_t m_chanceSamples;
     std::map<std::pair<std::uint64_t, std::size_t>, std::size_t> m_spaceOf; // by board and parent space
 
     // The space of `board`, one card more than the board of space `parentIndex`.
@@ -198,11 +203,29 @@ private:
         if (G::isChance(s))
         {
             nodes[idx].kind = Kind::chance;
-            const std::uint64_t live = ((1ull << 52) - 1) & ~s.board;
-            for (std::uint64_t c = live; c != 0; c &= c - 1)
+            std::vector<std::uint64_t> cards;
+            for (std::uint64_t c = ((1ull << 52) - 1) & ~s.board; c != 0; c &= c - 1)
+            {
+                cards.push_back(c & (~c + 1));
+            }
+            // A hand pair sees `remaining - 4` of the remaining cards, equally likely. Dealing only a
+            // sample, each dealt card stands for remaining / sampled of them: exact for a full deal and
+            // unbiased on average for a sample.
+            const auto remaining = static_cast<double>(cards.size());
+            if (m_chanceSamples > 0 && cards.size() > m_chanceSamples)
+            {
+                CfrRng rng{s.board * 0x9E3779B97F4A7C15ull ^ s.history};
+                for (std::size_t i = 0; i < m_chanceSamples; ++i)
+                {
+                    std::swap(cards[i], cards[i + rng() % (cards.size() - i)]);
+                }
+                cards.resize(m_chanceSamples);
+            }
+            nodes[idx].weight = static_cast<float>(remaining / (static_cast<double>(cards.size()) * (remaining - 4.0)));
+            for (const std::uint64_t card : cards)
             {
                 typename G::State next = s;
-                next.board |= c & (~c + 1);
+                next.board |= card;
                 const std::size_t childSpace = spaceFor(next.board, space);
                 children.push_back(nodes.size());
                 deepest = std::max(deepest, build(next, rootBoard, childSpace, level + 1));

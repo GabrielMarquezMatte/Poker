@@ -88,8 +88,9 @@ public:
     using Strategy = typename Tree::Strategy;
 
     // See SubgameTree for the arguments.
-    GpuSubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0)
-        : m_tree(root, ranges, averageLaterStreets, minReach), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
+    GpuSubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
+                     std::size_t chanceSamples = 0)
+        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
           m_forward(m_gpu.program, "forward"), m_terminals(m_gpu.program, "terminals"), m_backward(m_gpu.program, "backward"),
           m_averages(m_tree.averages, 0.0f)
     {
@@ -160,9 +161,10 @@ private:
     struct GpuNode
     {
         std::uint32_t vec, regret, average, space, hands, firstChild, invested;
+        float weight;
         std::uint8_t kind, toAct, children, folder;
     };
-    static_assert(sizeof(GpuNode) == 32);
+    static_assert(sizeof(GpuNode) == 36);
     static_assert(G::maxActions <= 8); // MAX_ACTIONS in the kernels
 
     Tree m_tree;
@@ -244,6 +246,7 @@ private:
                 out.space = static_cast<std::uint32_t>(node.space);
                 out.firstChild = node.children.empty() ? 0 : gpuOf[node.children.front()];
                 out.invested = s.invested[0] | (s.invested[1] << 16);
+                out.weight = node.weight;
                 out.kind = static_cast<std::uint8_t>(node.kind);
                 out.toAct = s.toAct;
                 out.children = static_cast<std::uint8_t>(node.children.size());
