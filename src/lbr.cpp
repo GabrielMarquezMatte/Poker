@@ -12,7 +12,8 @@ int main(int argc, char **argv)
     std::map<std::string, double> options{{"--hands", 10'000.0},
                                           {"--threads", static_cast<double>(std::thread::hardware_concurrency())},
                                           {"--flop-runouts", 100.0},
-                                          {"--seed", 1.0}};
+                                          {"--seed", 1.0},
+                                          {"--streets", 14.0}}; // LBR's call-down assumption is poor preflop
     bool valid = argc >= 4 && argc % 2 == 0;
     for (int i = 4; valid && i + 1 < argc; i += 2)
     {
@@ -29,7 +30,8 @@ int main(int argc, char **argv)
         {
             std::cerr << " [" << name << ' ' << value << ']';
         }
-        std::cerr << "\n  --hands is per LBR seat\n";
+        std::cerr << "\n  --hands is per LBR seat; --streets is a bitmask of where LBR deviates"
+                     " (1 preflop, 2 flop, 4 turn, 8 river; 0 = self-play)\n";
         return 1;
     }
 
@@ -55,7 +57,8 @@ int main(int argc, char **argv)
     std::cerr << "blueprint: " << blueprint->iterations() << " iterations, " << blueprint->numInfosets() << " infosets\n";
 
     const auto start = std::chrono::steady_clock::now();
-    const LocalBestResponse<BlueprintConfig> lbr(*blueprint, *equity, static_cast<std::size_t>(options["--flop-runouts"]));
+    const LocalBestResponse<BlueprintConfig> lbr(*blueprint, *equity, static_cast<std::size_t>(options["--flop-runouts"]),
+                                                  static_cast<unsigned>(options["--streets"]));
     const auto result = lbr.evaluate(static_cast<std::uint64_t>(options["--hands"]), static_cast<std::size_t>(options["--threads"]),
                                      static_cast<std::uint64_t>(options["--seed"]));
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();

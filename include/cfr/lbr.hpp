@@ -17,9 +17,13 @@ public:
     using G = Hunl<C>;
     using Range = std::array<double, holeCombos>;
 
+    static constexpr unsigned allStreets = 0b1111;
+
     // Flop equities average `flopRunouts` sampled turn/river pairs; turn and river are exact.
-    LocalBestResponse(const Mccfr<G> &opponent, const PreflopEquity &preflop, std::size_t flopRunouts = 100)
-        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts) {}
+    // LBR best-responds only on streets in `streets` (bit 0 preflop .. bit 3 river) and plays the
+    // strategy itself elsewhere, which splits exploitability by street (0 = self-play).
+    LocalBestResponse(const Mccfr<G> &opponent, const PreflopEquity &preflop, std::size_t flopRunouts = 100, unsigned streets = allStreets)
+        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts), m_streets(streets) {}
 
     // LBR's winnings in chips for one hand played from `seat` (0 small blind, 1 big blind).
     double playHand(std::size_t seat, CfrRng &rng) const
@@ -54,7 +58,11 @@ public:
             }
             const std::size_t n = G::numActions(s);
             std::size_t action = 0;
-            if (s.toAct == seat)
+            if (s.toAct == seat && (m_streets >> s.street & 1u) == 0)
+            {
+                action = sample(m_opponent.averageStrategy(G::infosetKey(s), n), n, rng);
+            }
+            else if (s.toAct == seat)
             {
                 action = choose(s, seat, range, buckets, rng);
             }
@@ -125,6 +133,7 @@ private:
     const Mccfr<G> &m_opponent;
     const PreflopEquity &m_preflop;
     std::size_t m_flopRunouts;
+    unsigned m_streets;
 
     static std::size_t sample(const typename Mccfr<G>::Strategy &sigma, std::size_t n, CfrRng &rng)
     {

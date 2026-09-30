@@ -42,3 +42,14 @@ TEST(Lbr, BarelyExploitsTrainedPushFold)
     const auto result = LocalBestResponse<PushFold20bb>(solver, *lbrEquity()).evaluate(200'000, 8, 2);
     EXPECT_NEAR(result.average(), exact.mbbPerHand(), 4 * result.averageError());
 }
+
+TEST(Lbr, SelfPlayWithNoDeviationStreetsBreaksEven)
+{
+    if (lbrEquity() == nullptr)
+    {
+        GTEST_SKIP();
+    }
+    const Mccfr<PushFold> untrained(1024);
+    const auto result = LocalBestResponse<PushFold20bb>(untrained, *lbrEquity(), 100, 0).evaluate(200'000, 8, 3);
+    EXPECT_NEAR(result.average(), 0.0, 4 * result.averageError());
+}
