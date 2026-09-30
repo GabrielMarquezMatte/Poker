@@ -1,4 +1,4 @@
-#include "../include/cfr/hunl.hpp"
+#include "../include/cfr/push_fold.hpp"
 #include <cmath>
 #include <memory>
 #include <gtest/gtest.h>
@@ -133,15 +133,7 @@ TEST(Hunl, TrainsOnFullTree)
     EXPECT_GT(solver.numInfosets(), 1000u);
 }
 
-// 20bb push/fold: small blind shoves or folds, big blind calls or folds.
-struct PushFold20bb : Hunl100bbConfig
-{
-    static constexpr std::uint32_t stack = 40;
-    static constexpr std::array<std::array<double, 0>, 4> raiseFractions{};
-    static constexpr std::array<std::uint8_t, 4> maxRaises{1, 1, 1, 1};
-    static constexpr bool allowLimp = false;
-};
-using Pf = Hunl<PushFold20bb>;
+using Pf = PushFold;
 
 static const Mccfr<Pf> &trainedPushFold()
 {
