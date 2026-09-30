@@ -4,6 +4,8 @@ benchmark/1.9.5
 bshoshany-thread-pool/5.1.0
 drogon/1.9.13
 glaze/8.4.0
+opencl-icd-loader/2025.07.22
+opencl-clhpp-headers/2025.07.22
 
 [options]
 drogon/*:with_boost=False

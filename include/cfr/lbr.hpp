@@ -8,11 +8,22 @@
 #include <thread>
 #include <vector>
 
+// LBR winnings in mbb/hand.
+struct LbrResult
+{
+    std::array<double, 2> mbbPerHand{};    // per LBR seat
+    std::array<double, 2> standardError{}; // mbb/hand
+    inline double average() const noexcept { return (mbbPerHand[0] + mbbPerHand[1]) / 2.0; }
+    inline double averageError() const noexcept { return std::hypot(standardError[0], standardError[1]) / 2.0; }
+};
+
 // Local best response (Lisy & Bowling 2017): plays real hands against a strategy's average policy,
 // tracking the opponent's range, and at each decision picks the action with the best value assuming
 // both players then check/call to showdown. Its winnings lower-bound the strategy's exploitability.
 // It uses the game's own bet sizes, so it never leaves the strategy's betting tree.
-template <typename C>
+// Turns are resolved with `TurnResolver`: SubgameSolver on the CPU, or GpuSubgameSolver. Rivers always use
+// SubgameSolver (their trees are too small for the GPU to win).
+template <typename C, template <typename> class TurnResolver = SubgameSolver>
 class LocalBestResponse
 {
 public:
@@ -119,13 +130,7 @@ public:
         return s.folder == G::nobody ? showdownValue(s, seat, range) : G::utility(s, seat);
     }
 
-    struct Result
-    {
-        std::array<double, 2> mbbPerHand{};    // per LBR seat
-        std::array<double, 2> standardError{}; // mbb/hand
-        inline double average() const noexcept { return (mbbPerHand[0] + mbbPerHand[1]) / 2.0; }
-        inline double averageError() const noexcept { return std::hypot(standardError[0], standardError[1]) / 2.0; }
-    };
+    using Result = LbrResult;
 
     Result evaluate(std::uint64_t handsPerSeat, std::size_t threads, std::uint64_t seed) const
     {
@@ -174,7 +179,7 @@ private:
     std::size_t m_riverIterations;
     std::size_t m_turnIterations;
 
-    using TurnSolver = SubgameSolver<CoarseRiver<C>>;
+    using TurnSolver = TurnResolver<CoarseRiver<C>>;
     static constexpr double minReach = 1e-3; // turn resolves leave out hands this unlikely for both players
     static_assert(sizeof(typename TurnSolver::G::State) == sizeof(typename G::State));
     // The strategy's resolves in the current hand, if any.

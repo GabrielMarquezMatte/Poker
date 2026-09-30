@@ -13,8 +13,9 @@ add_executable(PokerTest
 	lbr_test.cpp
 	subgame_solver_test.cpp
 	river_showdown_test.cpp
+	gpu_subgame_solver_test.cpp
 )
 target_compile_definitions(PokerTest PRIVATE POKER_DATA_DIR="${PROJECT_SOURCE_DIR}/data")
-target_link_libraries(PokerTest gtest::gtest GTest::gtest_main bshoshany-thread-pool::bshoshany-thread-pool)
+target_link_libraries(PokerTest gtest::gtest GTest::gtest_main bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)
 add_test(NAME PokerTest COMMAND PokerTest)
 gtest_discover_tests(PokerTest)

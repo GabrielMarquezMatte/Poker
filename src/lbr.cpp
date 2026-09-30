@@ -1,5 +1,6 @@
 // Estimates a blueprint's exploitability with local best response (a lower bound), in mbb/hand.
 #include "../include/cfr/blueprint.hpp"
+#include "../include/cfr/gpu_subgame_solver.hpp"
 #include "../include/cfr/lbr.hpp"
 #include <chrono>
 #include <iostream>
@@ -15,7 +16,8 @@ int main(int argc, char **argv)
                                           {"--seed", 1.0},
                                           {"--streets", 14.0}, // LBR's call-down assumption is poor preflop
                                           {"--river-iterations", 0.0},
-                                          {"--turn-iterations", 0.0}};
+                                          {"--turn-iterations", 0.0},
+                                          {"--gpu", 0.0}};
     bool valid = argc >= 4 && argc % 2 == 0;
     for (int i = 4; valid && i + 1 < argc; i += 2)
     {
@@ -35,7 +37,8 @@ int main(int argc, char **argv)
         std::cerr << "\n  --hands is per LBR seat; --streets is a bitmask of where LBR deviates"
                      " (1 preflop, 2 flop, 4 turn, 8 river; 0 = self-play)\n"
                      "  --river-iterations > 0 evaluates the blueprint resolving each river with that many DCFR iterations,\n"
-                     "  --turn-iterations > 0 each turn (to showdown, with a coarser river)\n";
+                     "  --turn-iterations > 0 each turn (to showdown, with a coarser river)\n"
+                     "  --gpu 1 resolves turns on the first OpenCL GPU\n";
         return 1;
     }
 
@@ -60,13 +63,23 @@ int main(int argc, char **argv)
     }
     std::cerr << "blueprint: " << blueprint->iterations() << " iterations, " << blueprint->numInfosets() << " infosets\n";
 
+    const bool gpu = options["--gpu"] != 0.0;
+    if (gpu && Gpu::instance() == nullptr)
+    {
+        std::cerr << "no OpenCL GPU\n";
+        return 1;
+    }
+    const auto run = [&]<template <typename> class Solver>()
+    {
+        const LocalBestResponse<BlueprintConfig, Solver> lbr(*blueprint, *equity, static_cast<std::size_t>(options["--flop-runouts"]),
+                                                             static_cast<unsigned>(options["--streets"]),
+                                                             static_cast<std::size_t>(options["--river-iterations"]),
+                                                             static_cast<std::size_t>(options["--turn-iterations"]));
+        return lbr.evaluate(static_cast<std::uint64_t>(options["--hands"]), static_cast<std::size_t>(options["--threads"]),
+                            static_cast<std::uint64_t>(options["--seed"]));
+    };
     const auto start = std::chrono::steady_clock::now();
-    const LocalBestResponse<BlueprintConfig> lbr(*blueprint, *equity, static_cast<std::size_t>(options["--flop-runouts"]),
-                                                  static_cast<unsigned>(options["--streets"]),
-                                                  static_cast<std::size_t>(options["--river-iterations"]),
-                                                  static_cast<std::size_t>(options["--turn-iterations"]));
-    const auto result = lbr.evaluate(static_cast<std::uint64_t>(options["--hands"]), static_cast<std::size_t>(options["--threads"]),
-                                     static_cast<std::uint64_t>(options["--seed"]));
+    const auto result = gpu ? run.template operator()<GpuSubgameSolver>() : run.template operator()<SubgameSolver>();
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     std::cout << "LBR as small blind: " << result.mbbPerHand[0] << " +/- " << 1.96 * result.standardError[0] << " mbb/hand\n"
               << "LBR as big blind:   " << result.mbbPerHand[1] << " +/- " << 1.96 * result.standardError[1] << " mbb/hand\n"
