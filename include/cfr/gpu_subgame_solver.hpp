@@ -75,8 +75,8 @@ struct Gpu
 // SubgameSolver on the GPU: the same DCFR over the same SubgameTree, with everything the iterations
 // touch kept in device memory. Nodes are renumbered breadth first so each node's children are
 // contiguous; one traversal launches a kernel per level down (reach), one for all terminals, and one
-// per level up (values and regrets), each over a level's non-terminal nodes times their hands. Only the
-// average strategy comes back.
+// per level up (values and regrets), each over a level's non-terminal nodes times their hands. Regrets
+// are stored in half precision; only the average strategy comes back.
 // Requires Gpu::instance().
 template <typename C>
 class GpuSubgameSolver
@@ -125,6 +125,7 @@ public:
                 }
                 m_backward.setArg(3, p);
                 m_backward.setArg(6, positiveDiscount);
+                m_backward.setArg(7, m_scale[p]);
                 for (std::size_t level = m_internal.size(); level-- > 0;)
                 {
                     if (m_internal[level].second > 0)
@@ -174,6 +175,10 @@ private:
     std::uint32_t m_numTerminals = 0;
     cl::Buffer m_nodes, m_internalIds, m_terminalIds, m_vec, m_regrets, m_averageSums;
     std::array<cl::Buffer, 2> m_ranges;
+    // Regrets are stored in half precision times m_scale[p] for player p, which bounds them by a few
+    // units: counterfactual values scale with the stack and the opponent's reach mass. Regret matching
+    // only uses ratios, so the scale never needs undoing.
+    std::array<float, 2> m_scale{};
     std::vector<cl::Buffer> m_spaceBuffers; // kept alive for the kernels
 
     template <typename T>
@@ -187,10 +192,12 @@ private:
         }
         return result;
     }
-    cl::Buffer zeros(std::size_t floats)
+    template <typename T = float>
+    cl::Buffer zeros(std::size_t count)
     {
-        cl::Buffer result(m_gpu.context, CL_MEM_READ_WRITE, std::max<std::size_t>(floats, 1) * sizeof(float));
-        m_queue.enqueueFillBuffer(result, 0.0f, 0, std::max<std::size_t>(floats, 1) * sizeof(float));
+        const std::size_t bytes = std::max<std::size_t>(count, 1) * sizeof(T);
+        cl::Buffer result(m_gpu.context, CL_MEM_READ_WRITE, bytes);
+        m_queue.enqueueFillBuffer(result, T{}, 0, bytes);
         return result;
     }
 
@@ -333,7 +340,16 @@ private:
         m_internalIds = buffer(internalIds);
         m_terminalIds = buffer(terminalIds);
         m_vec = zeros(vec);
-        m_regrets = zeros(m_tree.regrets);
+        m_regrets = zeros<std::uint16_t>(m_tree.regrets); // half precision, scaled (see m_scale)
+        for (std::size_t p = 0; p < 2; ++p)
+        {
+            double mass = 0.0;
+            for (const float r : m_tree.ranges[1 - p])
+            {
+                mass += r;
+            }
+            m_scale[p] = static_cast<float>(1.0 / std::max(mass * C::stack, 1e-6));
+        }
         m_averageSums = zeros(m_tree.averages);
         for (std::size_t p = 0; p < 2; ++p)
         {
@@ -371,8 +387,8 @@ private:
         m_backward.setArg(1, m_internalIds);
         m_backward.setArg(4, m_vec);
         m_backward.setArg(5, m_regrets);
-        m_backward.setArg(7, inverseBase);
-        m_backward.setArg(8, inverseHands);
+        m_backward.setArg(8, inverseBase);
+        m_backward.setArg(9, inverseHands);
     }
 };
 #endif // __POKER_CFR_GPU_SUBGAME_SOLVER_HPP__

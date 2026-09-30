@@ -56,9 +56,9 @@ double largestDifference(const SubgameSolver<C> &cpu, const GpuSubgameSolver<C> 
     return largest;
 }
 
-// One iteration matches the CPU up to rounding. Later, rounding differences grow where a hand's reach
-// is near zero (its average strategy there barely matters), so the solutions are compared by
-// exploitability instead.
+// One iteration matches the CPU up to rounding (regrets are half precision on the GPU). Later, rounding
+// differences grow where a hand's reach is near zero (its average strategy there barely matters), so
+// the solutions are compared by exploitability instead.
 template <typename C>
 void expectSameAsCpu(const typename Hunl<C>::State &root, const std::array<typename SubgameTree<C>::Hands, 2> &ranges, std::size_t iterations)
 {
@@ -70,7 +70,7 @@ void expectSameAsCpu(const typename Hunl<C>::State &root, const std::array<typen
     GpuSubgameSolver<C> gpu(root, ranges);
     cpu.solve(1);
     gpu.solve(1);
-    EXPECT_LT(largestDifference(cpu, gpu), 1e-4);
+    EXPECT_LT(largestDifference(cpu, gpu), 1e-3);
     cpu.solve(iterations - 1);
     gpu.solve(iterations - 1);
     const double pot = 2.0 * root.invested[0];

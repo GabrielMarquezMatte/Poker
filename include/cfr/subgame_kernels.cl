@@ -30,7 +30,7 @@ inline float positive(float r) { return r > 0.0f ? r : 0.0f; }
 // Reach of the children of the non-terminal nodes ids[first, first + count), from theirs: one work-item
 // per node and hand computes the current strategy once for all its children.
 __kernel void forward(__global const Node *nodes, __global const uint *ids, uint first, uint p, __global float *vec,
-                      __global const float *regrets, __global float *averages, float discount, __global const uint *spaceInverse,
+                      __global const half *regrets, __global float *averages, float discount, __global const uint *spaceInverse,
                       __global const ushort *inverse)
 {
     const Node node = nodes[ids[first + get_global_id(0)]];
@@ -62,13 +62,13 @@ __kernel void forward(__global const Node *nodes, __global const uint *ids, uint
         }
         return;
     }
-    __global const float *regret = regrets + node.regret;
+    __global const half *regret = regrets + node.regret;
     const uint hands = node.hands;
     float r[MAX_ACTIONS];
     float total = 0.0f;
     for (uint a = 0; a < n; ++a)
     {
-        r[a] = positive(regret[a * hands + i]);
+        r[a] = positive(vload_half(a * hands + i, regret));
         total += r[a];
     }
     const float inverseTotal = total > 0.0f ? 1.0f / total : 0.0f; // rounded as on the CPU
@@ -96,7 +96,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
     __local float reach[MAX_HANDS];
     __local float prefix[MAX_HANDS + 1];      // reach of the hands before each position
     __local float cardPrefix[2 * MAX_HANDS + 52]; // per card list entry k of card c at k + c; the card's total after its list
-    __local float part[GROUP];
+    __local float part[GROUP], cardPart[GROUP];
     const Node node = nodes[ids[get_group_id(0)]];
     const uint n = node.hands, lid = get_local_id(0);
     __global float *v = vec + node.vec;
@@ -109,17 +109,23 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
     const uint h0 = spaceHand[node.space];
     __global const uint *cards = spaceCards + 53 * node.space;
     __global const ushort *list = cardHands + spaceList[node.space];
-    if (lid < 52)
+    // Per-card prefixes, four threads per card: each sums a quarter of the card's list, and once all
+    // quarter sums are in, writes its prefixes starting from the quarters before it.
+    const uint card = lid / 4, quarter = lid % 4;
+    uint from = 0, to = 0;
+    float cardSum = 0.0f;
+    if (card < 52)
     {
-        float acc = 0.0f;
-        const uint end = cards[lid + 1];
-        for (uint k = cards[lid]; k < end; ++k)
+        const uint cardBegin = cards[card], cardEnd = cards[card + 1];
+        const uint per = (cardEnd - cardBegin + 3) / 4;
+        from = min(cardBegin + quarter * per, cardEnd);
+        to = min(from + per, cardEnd);
+        for (uint k = from; k < to; ++k)
         {
-            cardPrefix[k + lid] = acc;
-            acc += reach[list[k]];
+            cardSum += reach[list[k]];
         }
-        cardPrefix[end + lid] = acc;
     }
+    cardPart[lid] = cardSum;
     // Exclusive prefix over positions: per-thread chunks, then a scan of the chunk sums.
     const uint chunk = (n + GROUP - 1) / GROUP;
     const uint begin = min(lid * chunk, n), stop = min(begin + chunk, n);
@@ -146,6 +152,23 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
     if (lid == GROUP - 1)
     {
         prefix[n] = part[lid];
+    }
+    if (card < 52)
+    {
+        float cardAcc = 0.0f;
+        for (uint q = 0; q < quarter; ++q)
+        {
+            cardAcc += cardPart[4 * card + q];
+        }
+        for (uint k = from; k < to; ++k)
+        {
+            cardPrefix[k + card] = cardAcc;
+            cardAcc += reach[list[k]];
+        }
+        if (quarter == 3)
+        {
+            cardPrefix[to + card] = cardAcc; // the last quarter ends at the list's end
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -178,7 +201,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
 // Values of the non-terminal nodes ids[first, first + count) from their children's, updating the
 // traverser's regrets.
 __kernel void backward(__global const Node *nodes, __global const uint *ids, uint first, uint p, __global float *vec,
-                       __global float *regrets, float positiveDiscount, __global const uint *spaceInverse,
+                       __global half *regrets, float positiveDiscount, float scale, __global const uint *spaceInverse,
                        __global const ushort *inverse)
 {
     const Node node = nodes[ids[first + get_global_id(0)]];
@@ -209,13 +232,13 @@ __kernel void backward(__global const Node *nodes, __global const uint *ids, uin
         vec[node.vec + i] = out;
         return;
     }
-    __global float *regret = regrets + node.regret;
+    __global half *regret = regrets + node.regret;
     const uint hands = node.hands;
     float r[MAX_ACTIONS], v[MAX_ACTIONS];
     float total = 0.0f;
     for (uint a = 0; a < n; ++a)
     {
-        r[a] = regret[a * hands + i];
+        r[a] = vload_half(a * hands + i, regret);
         v[a] = vec[nodes[node.firstChild + a].vec + i];
         total += positive(r[a]);
     }
@@ -227,7 +250,7 @@ __kernel void backward(__global const Node *nodes, __global const uint *ids, uin
     }
     for (uint a = 0; a < n; ++a)
     {
-        regret[a * hands + i] = r[a] * (r[a] > 0.0f ? positiveDiscount : 0.5f) + (v[a] - out);
+        vstore_half(r[a] * (r[a] > 0.0f ? positiveDiscount : 0.5f) + (v[a] - out) * scale, a * hands + i, regret);
     }
     vec[node.vec + i] = out;
 }
