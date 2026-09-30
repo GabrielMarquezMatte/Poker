@@ -1,6 +1,6 @@
 #ifndef __POKER_CFR_LBR_HPP__
 #define __POKER_CFR_LBR_HPP__
-#include "river_solver.hpp"
+#include "subgame_solver.hpp"
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -24,11 +24,14 @@ public:
     // Flop equities average `flopRunouts` sampled turn/river pairs; turn and river are exact.
     // LBR best-responds only on streets in `streets` (bit 0 preflop .. bit 3 river) and plays the
     // strategy itself elsewhere, which splits exploitability by street (0 = self-play).
-    // `riverIterations` > 0 makes the strategy resolve each river with RiverSolver (that many CFR+
-    // iterations) from the ranges its blueprint implies, instead of playing the blueprint there.
+    // `riverIterations` > 0 makes the strategy resolve each river with SubgameSolver (that many DCFR
+    // iterations) from the ranges it implies, instead of playing the blueprint there. `turnIterations` > 0
+    // does the same on the turn, solving to showdown with a coarser river (CoarseRiver); the river is
+    // then resolved again, if enabled, from the ranges the turn solution implies.
     LocalBestResponse(const Mccfr<G> &opponent, const PreflopEquity &preflop, std::size_t flopRunouts = 100, unsigned streets = allStreets,
-                      std::size_t riverIterations = 0)
-        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts), m_streets(streets), m_riverIterations(riverIterations) {}
+                      std::size_t riverIterations = 0, std::size_t turnIterations = 0)
+        : m_opponent(opponent), m_preflop(preflop), m_flopRunouts(flopRunouts), m_streets(streets), m_riverIterations(riverIterations),
+          m_turnIterations(turnIterations) {}
 
     // LBR's winnings in chips for one hand played from `seat` (0 small blind, 1 big blind).
     double playHand(std::size_t seat, CfrRng &rng) const
@@ -36,9 +39,9 @@ public:
         typename G::State s = G::sampleChance(G::initial(), rng);
         const std::size_t opp = 1 - seat;
         const std::uint64_t hero = s.hole[seat];
-        const bool resolving = m_riverIterations > 0;
-        // range: the opponent's hands as LBR sees them. beliefs: LBR's hands as the opponent's blueprint
-        // sees them, which seeds the river resolve.
+        const bool resolving = m_riverIterations > 0 || m_turnIterations > 0;
+        // range: the opponent's hands as LBR sees them. beliefs: LBR's hands as the opponent's strategy
+        // sees them, which seeds its resolves.
         Range range{}, beliefs{};
         for (std::size_t h = 0; h < holeCombos; ++h)
         {
@@ -47,7 +50,7 @@ public:
         }
         std::array<std::uint16_t, holeCombos> buckets{};
         int bucketStreet = -1;
-        std::unique_ptr<RiverSolver<C>> river;
+        Solvers solvers;
         while (!G::isTerminal(s))
         {
             if (G::isChance(s))
@@ -69,27 +72,27 @@ public:
                 }
                 bucketStreet = s.street;
             }
-            if (resolving && s.street == 3 && river == nullptr)
+            if (m_turnIterations > 0 && s.street == 2 && solvers.turn == nullptr)
             {
-                std::array<Range, 2> ranges{};
-                ranges[opp] = range;
-                ranges[seat] = beliefs;
-                if (std::accumulate(beliefs.begin(), beliefs.end(), 0.0) <= 0.0)
-                {
-                    ranges[seat].fill(1.0); // LBR left the blueprint's support: assume any hand
-                }
-                river = std::make_unique<RiverSolver<C>>(s, ranges);
-                river->solve(m_riverIterations);
+                // Hunl<CoarseRiver<C>> shares the state layout and the turn's betting.
+                solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(s), resolveRanges(seat, range, beliefs),
+                                                            false, minReach); // the river is resolved again
+                solvers.turn->solve(m_turnIterations);
+            }
+            if (m_riverIterations > 0 && s.street == 3 && solvers.river == nullptr)
+            {
+                solvers.river = std::make_unique<SubgameSolver<C>>(s, resolveRanges(seat, range, beliefs));
+                solvers.river->solve(m_riverIterations);
             }
             const std::size_t n = G::numActions(s);
             std::size_t action = 0;
             if (s.toAct == seat && (m_streets >> s.street & 1u) != 0)
             {
-                action = choose(s, seat, range, buckets, river.get(), rng);
+                action = choose(s, seat, range, buckets, solvers, rng);
             }
             else
             {
-                action = sample(policy(s, holeIndex(s.hole[s.toAct]), s.bucket[s.street][s.toAct], river.get()), n, rng);
+                action = sample(policy(s, holeIndex(s.hole[s.toAct]), s.bucket[s.street][s.toAct], solvers), n, rng);
             }
             if (s.toAct == opp)
             {
@@ -97,23 +100,23 @@ public:
                 {
                     if (range[h] > 0.0)
                     {
-                        range[h] *= policy(s, h, buckets[h], river.get())[action];
+                        range[h] *= policy(s, h, buckets[h], solvers)[action];
                     }
                 }
             }
-            else if (resolving && river == nullptr)
+            else if (resolving && solvers.river == nullptr)
             {
                 for (std::size_t h = 0; h < holeCombos; ++h)
                 {
                     if (beliefs[h] > 0.0)
                     {
-                        beliefs[h] *= m_opponent.averageStrategy(G::infosetKeyWithBucket(s, buckets[h]), n)[action];
+                        beliefs[h] *= policy(s, h, buckets[h], solvers)[action];
                     }
                 }
             }
             s = G::apply(s, action);
         }
-        return G::utility(s, seat);
+        return s.folder == G::nobody ? showdownValue(s, seat, range) : G::utility(s, seat);
     }
 
     struct Result
@@ -169,15 +172,66 @@ private:
     std::size_t m_flopRunouts;
     unsigned m_streets;
     std::size_t m_riverIterations;
+    std::size_t m_turnIterations;
+
+    using TurnSolver = SubgameSolver<CoarseRiver<C>>;
+    static constexpr double minReach = 1e-3; // turn resolves leave out hands this unlikely for both players
+    static_assert(sizeof(typename TurnSolver::G::State) == sizeof(typename G::State));
+    // The strategy's resolves in the current hand, if any.
+    struct Solvers
+    {
+        std::unique_ptr<TurnSolver> turn;
+        std::unique_ptr<SubgameSolver<C>> river;
+    };
+
+    static std::array<Range, 2> resolveRanges(std::size_t seat, const Range &range, const Range &beliefs)
+    {
+        std::array<Range, 2> ranges{};
+        ranges[1 - seat] = range;
+        ranges[seat] = beliefs;
+        if (std::accumulate(beliefs.begin(), beliefs.end(), 0.0) <= 0.0)
+        {
+            ranges[seat].fill(1.0); // LBR left the strategy's support: assume any hand
+        }
+        return ranges;
+    }
 
     // The strategy's policy at `s` for the player to act holding `hand` (whose bucket is `bucket`).
-    typename Mccfr<G>::Strategy policy(const typename G::State &s, std::size_t hand, std::uint16_t bucket, const RiverSolver<C> *river) const
+    typename Mccfr<G>::Strategy policy(const typename G::State &s, std::size_t hand, std::uint16_t bucket, const Solvers &solvers) const
     {
-        if (river != nullptr && river->contains(s))
+        if (s.street == 3 && solvers.river != nullptr && solvers.river->contains(s))
         {
-            return river->strategy(s, hand);
+            return solvers.river->strategy(s, hand);
+        }
+        if (s.street == 2 && solvers.turn != nullptr && solvers.turn->contains(s))
+        {
+            return solvers.turn->strategy(s, hand);
         }
         return m_opponent.averageStrategy(G::infosetKeyWithBucket(s, bucket), G::numActions(s));
+    }
+
+    // At a showdown, the opponent's hand is distributed as `range` given everything public (its strategy
+    // only sees its hand and public information), so LBR's expected winnings over that range are an
+    // unbiased stand-in for the actual result, without the variance of which hand it held.
+    static double showdownValue(const typename G::State &s, std::size_t seat, const Range &range)
+    {
+        const ClassificationResult mine = Hand::classify(Deck::from_mask(s.hole[seat] | s.board));
+        double total = 0.0, won = 0.0, lost = 0.0;
+        for (std::size_t h = 0; h < holeCombos; ++h)
+        {
+            if (range[h] > 0.0)
+            {
+                const ClassificationResult theirs = Hand::classify(Deck::from_mask(holes[h] | s.board));
+                total += range[h];
+                won += mine > theirs ? range[h] : 0.0;
+                lost += mine < theirs ? range[h] : 0.0;
+            }
+        }
+        if (total <= 0.0)
+        {
+            return G::utility(s, seat); // underflowed range
+        }
+        return (won * s.invested[1 - seat] - lost * s.invested[seat]) / total;
     }
 
     static std::size_t sample(const typename Mccfr<G>::Strategy &sigma, std::size_t n, CfrRng &rng)
@@ -251,7 +305,7 @@ private:
     }
 
     std::size_t choose(const typename G::State &s, std::size_t seat, const Range &range, const std::array<std::uint16_t, holeCombos> &buckets,
-                       const RiverSolver<C> *river, CfrRng &rng) const
+                       const Solvers &solvers, CfrRng &rng) const
     {
         const std::size_t opp = 1 - seat;
         const Range share = winShares(s, s.hole[seat], range, rng);
@@ -290,7 +344,7 @@ private:
                 {
                     if (range[h] > 0.0)
                     {
-                        const double foldProbability = policy(child, h, buckets[h], river)[0];
+                        const double foldProbability = policy(child, h, buckets[h], solvers)[0];
                         total += range[h];
                         folded += range[h] * foldProbability;
                         callers[h] = range[h] * (1.0 - foldProbability);

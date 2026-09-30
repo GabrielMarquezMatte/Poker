@@ -11,7 +11,7 @@ add_executable(PokerTest
 	card_abstraction_test.cpp
 	push_fold_test.cpp
 	lbr_test.cpp
-	river_solver_test.cpp
+	subgame_solver_test.cpp
 	river_showdown_test.cpp
 )
 target_compile_definitions(PokerTest PRIVATE POKER_DATA_DIR="${PROJECT_SOURCE_DIR}/data")

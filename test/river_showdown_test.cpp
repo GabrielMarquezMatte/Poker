@@ -1,8 +1,8 @@
-#include "../include/cfr/river_solver.hpp"
+#include "../include/cfr/subgame_solver.hpp"
 #include <gtest/gtest.h>
 
 // Terminal values against a plain O(hands^2) evaluation, with random reach and card removal.
-TEST(RiverSolver, TerminalValuesMatchBruteForce)
+TEST(SubgameSolver, TerminalValuesMatchBruteForce)
 {
     using G = Hunl<Hunl100bbConfig>;
     CfrRng rng{11};
@@ -14,12 +14,14 @@ TEST(RiverSolver, TerminalValuesMatchBruteForce)
         root.street = 3;
         root.invested = {20, 20};
         root.toAct = 1;
-        RiverSolver<Hunl100bbConfig>::Hands reach{};
+        SubgameSolver<Hunl100bbConfig>::Hands reach{};
         for (auto &r : reach)
         {
             r = (rng() % 4 == 0) ? 0.0 : static_cast<double>(rng() % 1000) / 1000.0;
         }
-        const RiverSolver<Hunl100bbConfig> solver(root, {reach, reach});
+        SubgameSolver<Hunl100bbConfig>::Hands uniform{};
+        uniform.fill(1.0); // every hand in the solver; the helpers take `reach` directly
+        const SubgameSolver<Hunl100bbConfig> solver(root, {uniform, uniform});
         const auto mass = solver.disjointMass(reach);
         const auto showdown = solver.showdown(reach, 3.0f);
         for (std::size_t h = 0; h < holeCombos; ++h)
