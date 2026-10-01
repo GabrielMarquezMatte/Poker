@@ -1,10 +1,13 @@
 // OpenCL C for GpuSubgameSolver: one traversal of vector-form DCFR for player `p`, as
-// forward (reach, level by level from the root) -> terminals -> backward (values and regrets, level by
+// forward (reach, level by level from the root) -> folds and showdowns -> backward (values and regrets, level by
 // level to the root). `vec` holds each node's opponent reach on the way down and is overwritten with
-// the traverser's values on the way up. The current strategy is recomputed from regrets where needed.
+// the traverser's values on the way up. The traverser's own actions leave the opponent's reach as it
+// was, so below them a node reads it where an ancestor holds it (Node.reach) instead of from a copy.
+// The current strategy is recomputed from regrets where needed.
 // CMake embeds this file as the string `subgameKernels` (see cmake/embed.cmake).
 #define MAX_HANDS 1326
 #define GROUP 256
+#define FOLD_GROUP 64
 #define MAX_ACTIONS 8
 #define NONE 0xFFFFFFFFu
 #define NO_HAND 0xFFFFu
@@ -22,14 +25,16 @@ typedef struct
     uint hands;
     uint firstChild; // children are contiguous
     uint invested;   // player 0 in the low half, player 1 in the high half
+    uint reach[2];   // into vec: where the opponent's reach is when player p traverses
     float weight;    // chance: each child's probability for a hand pair
     uchar kind, toAct, children, folder;
 } Node;
 
 inline float positive(float r) { return r > 0.0f ? r : 0.0f; }
 
-// Reach of the children of the non-terminal nodes ids[first, first + count), from theirs: one work-item
-// per node and hand computes the current strategy once for all its children.
+// Reach of the children of the nodes ids[first, first + count), from theirs: chance nodes and the
+// decisions of p's opponent (p's own are not listed: their children read the reach from above). One
+// work-item per node and hand computes the current strategy once for all its children.
 __kernel void forward(__global const Node *nodes, __global const uint *ids, uint first, uint p, __global float *vec,
                       __global const half *regrets, __global float *averages, float discount, __global const uint *spaceInverse,
                       __global const ushort *inverse)
@@ -40,7 +45,7 @@ __kernel void forward(__global const Node *nodes, __global const uint *ids, uint
     {
         return;
     }
-    const float reach = vec[node.vec + i];
+    const float reach = vec[node.reach[p] + i];
     const uint n = node.children;
     if (node.kind == CHANCE)
     {
@@ -52,14 +57,6 @@ __kernel void forward(__global const Node *nodes, __global const uint *ids, uint
             {
                 vec[child.vec + j] = reach;
             }
-        }
-        return;
-    }
-    if (node.toAct == p)
-    {
-        for (uint a = 0; a < n; ++a)
-        {
-            vec[nodes[node.firstChild + a].vec + i] = reach;
         }
         return;
     }
@@ -86,8 +83,56 @@ __kernel void forward(__global const Node *nodes, __global const uint *ids, uint
     }
 }
 
-// Terminal values for player p, one work-group per terminal, in place of its reach.
-__kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
+// Fold values for player p, one work-group per fold: the payoff times the
+// opponent's reach over the hands sharing no card with each hand, which takes only each card's reach.
+__kernel __attribute__((reqd_work_group_size(FOLD_GROUP, 1, 1))) void folds(
+    __global const Node *nodes, __global const uint *ids, uint p, __global float *vec, __global const uint *spaceHand,
+    __global const uint *spaceList, __global const uint *spaceCards, __global const uchar *low, __global const uchar *high,
+    __global const ushort *cardHands)
+{
+    __local float reach[MAX_HANDS];
+    __local float cardSum[52]; // one thread per card
+    const Node node = nodes[ids[get_group_id(0)]];
+    const uint n = node.hands, lid = get_local_id(0);
+    __global float *v = vec + node.vec;
+    __global const float *opponent = vec + node.reach[p];
+    for (uint i = lid; i < n; i += FOLD_GROUP)
+    {
+        reach[i] = opponent[i];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    const uint h0 = spaceHand[node.space];
+    if (lid < 52)
+    {
+        __global const uint *cards = spaceCards + 53 * node.space;
+        __global const ushort *list = cardHands + spaceList[node.space];
+        float sum = 0.0f;
+        for (uint k = cards[lid]; k < cards[lid + 1]; ++k)
+        {
+            sum += reach[list[k]];
+        }
+        cardSum[lid] = sum;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    float total = 0.0f; // every hand is in two cards' sums
+    for (uint c = 0; c < 52; ++c)
+    {
+        total += cardSum[c];
+    }
+    total *= 0.5f;
+    const uint mine = (node.invested >> (16 * p)) & 0xFFFFu;
+    const uint folderInvested = (node.invested >> (16 * node.folder)) & 0xFFFFu;
+    const float payoff = node.folder == p ? -(float)mine : (float)folderInvested;
+    for (uint i = lid; i < n; i += FOLD_GROUP)
+    {
+        v[i] = payoff * (total - cardSum[low[h0 + i]] - cardSum[high[h0 + i]] + reach[i]);
+    }
+}
+
+// Showdown values for player p, one work-group per showdown.
+__kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void showdowns(
     __global const Node *nodes, __global const uint *ids, uint p, __global float *vec, __global const uint *spaceHand,
     __global const uint *spaceList, __global const uint *spaceCards, __global const uchar *low, __global const uchar *high,
     __global const ushort *groupStart, __global const ushort *groupEnd, __global const ushort *lowBefore,
@@ -101,9 +146,10 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
     const Node node = nodes[ids[get_group_id(0)]];
     const uint n = node.hands, lid = get_local_id(0);
     __global float *v = vec + node.vec;
+    __global const float *opponent = vec + node.reach[p];
     for (uint i = lid; i < n; i += GROUP)
     {
-        reach[i] = v[i];
+        reach[i] = opponent[i];
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -175,18 +221,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void terminals(
 
     const float total = prefix[n];
     const uint mine = (node.invested >> (16 * p)) & 0xFFFFu;
-    if (node.kind == FOLD)
-    {
-        const uint folderInvested = (node.invested >> (16 * node.folder)) & 0xFFFFu;
-        const float payoff = node.folder == p ? -(float)mine : (float)folderInvested;
-        for (uint i = lid; i < n; i += GROUP)
-        {
-            const uint l = low[h0 + i], h = high[h0 + i];
-            v[i] = payoff * (total - cardPrefix[cards[l + 1] + l] - cardPrefix[cards[h + 1] + h] + reach[i]);
-        }
-        return;
-    }
-    // Showdown, as on the CPU: win - lose = W + W' - D over disjoint opponent mass strictly weaker (W),
+    // As on the CPU: win - lose = W + W' - D over disjoint opponent mass strictly weaker (W),
     // weaker or tied (W') and all of it (D); a hand counts itself in both card sums, so W' and D add it back.
     const float stake = (float)mine;
     for (uint i = lid; i < n; i += GROUP)
