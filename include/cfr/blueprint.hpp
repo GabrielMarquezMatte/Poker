@@ -14,6 +14,13 @@ struct BlueprintConfig : Hunl100bbConfig
 };
 using Blueprint = Hunl<BlueprintConfig>;
 
+// The same abstraction 200bb deep, as Slumbot plays.
+struct Blueprint200Config : BlueprintConfig
+{
+    static constexpr std::uint32_t stack = 400;
+};
+using Blueprint200 = Hunl<Blueprint200Config>;
+
 // Public decision nodes per street (the betting tree ignores cards).
 template <typename G>
 void countPublicNodes(const typename G::State &s, std::array<std::uint64_t, 4> &nodes, CfrRng &rng)
@@ -34,11 +41,12 @@ void countPublicNodes(const typename G::State &s, std::array<std::uint64_t, 4> &
     }
 }
 // Upper bound on blueprint infosets: every public node times its street's bucket count.
-inline std::uint64_t blueprintInfosetBound(const CardAbstraction &abstraction, std::array<std::uint64_t, 4> &nodes)
+template <typename G = Blueprint>
+std::uint64_t blueprintInfosetBound(const CardAbstraction &abstraction, std::array<std::uint64_t, 4> &nodes)
 {
     nodes = {};
     CfrRng rng{1};
-    countPublicNodes<Blueprint>(Blueprint::initial(), nodes, rng);
+    countPublicNodes<G>(G::initial(), nodes, rng);
     std::uint64_t bound = nodes[0] * 169;
     for (std::size_t street = 1; street < 4; ++street)
     {
@@ -49,9 +57,10 @@ inline std::uint64_t blueprintInfosetBound(const CardAbstraction &abstraction, s
 }
 
 // Table sized for the bound at a 2/3 load factor.
-inline std::size_t blueprintCapacity(const CardAbstraction &abstraction)
+template <typename G = Blueprint>
+std::size_t blueprintCapacity(const CardAbstraction &abstraction)
 {
     std::array<std::uint64_t, 4> nodes{};
-    return blueprintInfosetBound(abstraction, nodes) * 3 / 2;
+    return blueprintInfosetBound<G>(abstraction, nodes) * 3 / 2;
 }
 #endif // __POKER_CFR_BLUEPRINT_HPP__

@@ -175,13 +175,16 @@ struct Hunl
         return out;
     }
 
-    static State apply(const State &s, std::size_t action)
+    static State apply(const State &s, std::size_t action) { return applyTo(s, legalActions(s).to[action], action); }
+
+    // The actor puts `to` chips in total (fold = sentinel), which need not be one of legalActions: real
+    // opponents bet any size. `token` extends the history hash (apply passes the action index).
+    static State applyTo(const State &s, std::uint32_t to, std::uint64_t token)
     {
-        const std::uint32_t to = legalActions(s).to[action];
         const std::uint8_t player = s.toAct;
         const std::uint8_t opp = static_cast<std::uint8_t>(1 - player);
         State next = s;
-        next.history = mix(s.history, action);
+        next.history = mix(s.history, token);
         ++next.actions;
         if (to == fold)
         {

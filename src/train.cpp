@@ -14,19 +14,20 @@
 static std::uint64_t cards(std::string_view s) { return Deck::parseHand(s).getMask(); }
 
 // Small blind's opening strategy for a few hands; opponent and runout only complete the deal.
-static void printOpenings(const Mccfr<Blueprint> &solver)
+template <typename G>
+static void printOpenings(const Mccfr<G> &solver)
 {
-    const auto legal = Blueprint::legalActions(Blueprint::initial());
+    const auto legal = G::legalActions(G::initial());
     std::cerr << "small blind open, columns:";
     for (std::size_t a = 0; a < legal.size; ++a)
     {
-        std::cerr << ' ' << (legal.to[a] == Blueprint::fold ? std::string("fold") : std::to_string(legal.to[a]));
+        std::cerr << ' ' << (legal.to[a] == G::fold ? std::string("fold") : std::to_string(legal.to[a]));
     }
     std::cerr << " (chips invested, big blind = 2)\n";
     for (const char *hand : {"As Ah", "Ks Qs", "Ts 9s", "5c 5d", "Kc 7h", "7c 2d"})
     {
-        const auto s = Blueprint::deal(Blueprint::initial(), cards(hand), cards("3h 3s"), cards("8c 8d 4h"), cards("Jc"), cards("Qd"));
-        const auto sigma = solver.averageStrategy(Blueprint::infosetKey(s), legal.size);
+        const auto s = G::deal(G::initial(), cards(hand), cards("3h 3s"), cards("8c 8d 4h"), cards("Jc"), cards("Qd"));
+        const auto sigma = solver.averageStrategy(G::infosetKey(s), legal.size);
         std::cerr << "  " << hand << ':';
         for (std::size_t a = 0; a < legal.size; ++a)
         {
@@ -36,9 +37,13 @@ static void printOpenings(const Mccfr<Blueprint> &solver)
     }
 }
 
+template <typename G>
+static int train(const CardAbstraction &abstraction, const std::string &blueprintPath, std::map<std::string, double> &options);
+
 int main(int argc, char **argv)
 {
     std::map<std::string, double> options{{"--minutes", 60.0},
+                                          {"--stack-bb", 100.0},
                                           {"--threads", static_cast<double>(std::thread::hardware_concurrency())},
                                           {"--block-seconds", 60.0},
                                           {"--checkpoint-blocks", 10.0},
@@ -60,17 +65,10 @@ int main(int argc, char **argv)
         {
             std::cerr << " [" << name << ' ' << value << ']';
         }
-        std::cerr << "\n  --prune-threshold < 0 enables regret-based pruning once the blueprint has --prune-after-blocks blocks\n";
+        std::cerr << "\n  --prune-threshold < 0 enables regret-based pruning once the blueprint has --prune-after-blocks blocks\n"
+                     "  --stack-bb is 100 or 200 (Slumbot's depth)\n";
         return 1;
     }
-    const std::string blueprintPath = argv[2];
-    const double minutes = options["--minutes"];
-    const std::size_t threads = static_cast<std::size_t>(options["--threads"]);
-    const double blockSeconds = options["--block-seconds"];
-    const std::uint64_t checkpointBlocks = static_cast<std::uint64_t>(options["--checkpoint-blocks"]);
-    const float pruneThreshold = static_cast<float>(options["--prune-threshold"]);
-    const std::uint64_t pruneAfterBlocks = static_cast<std::uint64_t>(options["--prune-after-blocks"]);
-
     const auto abstraction = std::make_unique<CardAbstraction>();
     if (!abstraction->load(argv[1]))
     {
@@ -78,11 +76,32 @@ int main(int argc, char **argv)
         return 1;
     }
     BlueprintConfig::abstraction = abstraction.get();
+    if (options["--stack-bb"] == 200.0)
+    {
+        return train<Blueprint200>(*abstraction, argv[2], options);
+    }
+    if (options["--stack-bb"] != 100.0)
+    {
+        std::cerr << "--stack-bb must be 100 or 200\n";
+        return 1;
+    }
+    return train<Blueprint>(*abstraction, argv[2], options);
+}
+
+template <typename G>
+static int train(const CardAbstraction &abstraction, const std::string &blueprintPath, std::map<std::string, double> &options)
+{
+    const double minutes = options["--minutes"];
+    const std::size_t threads = static_cast<std::size_t>(options["--threads"]);
+    const double blockSeconds = options["--block-seconds"];
+    const std::uint64_t checkpointBlocks = static_cast<std::uint64_t>(options["--checkpoint-blocks"]);
+    const float pruneThreshold = static_cast<float>(options["--prune-threshold"]);
+    const std::uint64_t pruneAfterBlocks = static_cast<std::uint64_t>(options["--prune-after-blocks"]);
 
     std::array<std::uint64_t, 4> nodes{};
-    const std::uint64_t bound = blueprintInfosetBound(*abstraction, nodes);
-    auto solver = std::make_unique<Mccfr<Blueprint>>(blueprintCapacity(*abstraction));
-    const double gigabytes = static_cast<double>(solver->capacity()) * (8 + 8 * Blueprint::maxActions) / 1e9;
+    const std::uint64_t bound = blueprintInfosetBound<G>(abstraction, nodes);
+    auto solver = std::make_unique<Mccfr<G>>(blueprintCapacity<G>(abstraction));
+    const double gigabytes = static_cast<double>(solver->capacity()) * (8 + 8 * G::maxActions) / 1e9;
     std::cerr << "public nodes " << nodes[0] << '/' << nodes[1] << '/' << nodes[2] << '/' << nodes[3]
               << ", infoset bound " << bound << ", table " << solver->capacity() << " slots (" << gigabytes << " GB)\n";
     if (std::filesystem::exists(blueprintPath))
@@ -147,6 +166,6 @@ int main(int argc, char **argv)
             std::cerr << "checkpoint saved\n";
         }
     }
-    printOpenings(*solver);
+    printOpenings<G>(*solver);
     return 0;
 }

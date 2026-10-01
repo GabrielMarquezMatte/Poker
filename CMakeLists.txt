@@ -69,3 +69,5 @@ target_link_libraries(${PROJECT_NAME}_Benchmark PRIVATE benchmark::benchmark ben
 
 add_executable(${PROJECT_NAME}_Api src/api.cpp)
 target_link_libraries(${PROJECT_NAME}_Api PRIVATE Drogon::Drogon bshoshany-thread-pool::bshoshany-thread-pool glaze::glaze)
+add_executable(${PROJECT_NAME}_Slumbot src/slumbot.cpp)
+target_link_libraries(${PROJECT_NAME}_Slumbot PRIVATE Drogon::Drogon glaze::glaze bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)
