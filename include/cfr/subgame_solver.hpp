@@ -18,7 +18,8 @@ public:
 
     // See SubgameTree for the arguments.
     SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, const SubgameOptions &options = {})
-        : m_tree(root, ranges, options), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
+        : m_tree(root, ranges, options), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f),
+          m_allInBalance(m_tree.allIns > 0 ? m_tree.allInBalance() : std::vector<float>{})
     {
         m_scratch.resize(m_tree.depth + 1);
         for (auto &scratch : m_scratch)
@@ -106,6 +107,7 @@ private:
 
     Tree m_tree;
     std::vector<float> m_regret, m_strategy;
+    std::vector<float> m_allInBalance; // see SubgameTree::allInBalance
     std::vector<Scratch> m_scratch; // one per tree depth
     std::size_t m_iteration = 0;
     float m_positiveDiscount = 0.0f;
@@ -182,6 +184,26 @@ private:
             return;
         }
         const std::size_t hands = space.size();
+        if (node.kind == Kind::allIn)
+        {
+            // The balance is antisymmetric, so each opponent hand's row is subtracted whole: a loop MSVC
+            // vectorizes, unlike a sum along a row.
+            for (std::size_t i = 0; i < hands; ++i)
+            {
+                out[i] = 0.0f;
+            }
+            const float stake = static_cast<float>(s.invested[p]);
+            for (std::size_t j = 0; j < hands; ++j)
+            {
+                const float *__restrict row = m_allInBalance.data() + j * hands;
+                const float weight = stake * reach[j];
+                for (std::size_t i = 0; i < hands; ++i)
+                {
+                    out[i] -= weight * row[i];
+                }
+            }
+            return;
+        }
         const float payoff = s.folder == p ? -static_cast<float>(s.invested[p]) : static_cast<float>(s.invested[s.folder]);
         disjointMass(space, reach, out);
         for (std::size_t i = 0; i < hands; ++i)
@@ -287,7 +309,7 @@ private:
     void cfr(std::size_t idx, std::size_t p, const float *__restrict reach, float *__restrict out, std::size_t depth)
     {
         const Node &node = m_tree.nodes[idx];
-        if (node.kind == Kind::fold || node.kind == Kind::showdown)
+        if (node.children.empty())
         {
             terminal(node, p, reach, out);
             return;
@@ -365,7 +387,7 @@ private:
     {
         const Node &node = m_tree.nodes[idx];
         const std::size_t hands = m_tree.spaces[node.space].size();
-        if (node.kind == Kind::fold || node.kind == Kind::showdown)
+        if (node.children.empty())
         {
             terminal(node, p, reach.data(), out.data());
             return;

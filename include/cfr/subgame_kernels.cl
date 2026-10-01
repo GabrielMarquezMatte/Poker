@@ -1,13 +1,16 @@
 // OpenCL C for GpuSubgameSolver: one traversal of vector-form DCFR for player `p`, as
-// forward (reach, level by level from the root) -> folds and showdowns -> backward (values and regrets, level by
-// level to the root). `vec` holds each node's opponent reach on the way down and is overwritten with
-// the traverser's values on the way up. The traverser's own actions leave the opponent's reach as it
-// was, so below them a node reads it where an ancestor holds it (Node.reach) instead of from a copy.
+// forward (reach, level by level from the root) -> folds, showdowns and all-ins -> backward (values and
+// regrets, level by level to the root). `vec` holds each node's opponent reach on the way down and is
+// overwritten with the traverser's values on the way up. The traverser's own actions leave the opponent's
+// reach as it was, so below them a node reads it where an ancestor holds it (Node.reach) instead of from a
+// copy.
 // The current strategy is recomputed from regrets where needed.
 // CMake embeds this file as the string `subgameKernels` (see cmake/embed.cmake).
 #define MAX_HANDS 1326
 #define GROUP 256
 #define FOLD_GROUP 64
+#define ALL_IN_GROUP 1024
+#define ALL_IN_RUNOUTS 990.0f // the runouts two hands on a flop see: flopAllInRunouts
 #define MAX_ACTIONS 8
 #define NONE 0xFFFFFFFFu
 #define NO_HAND 0xFFFFu
@@ -15,6 +18,7 @@
 #define FOLD 1
 #define SHOWDOWN 2
 #define CHANCE 3
+#define ALL_IN 4
 
 typedef struct
 {
@@ -231,6 +235,73 @@ __kernel __attribute__((reqd_work_group_size(GROUP, 1, 1))) void showdowns(
         const float upto = prefix[groupEnd[h0 + i]] - cardPrefix[lowUpto[h0 + i] + l] - cardPrefix[highUpto[h0 + i] + h] + reach[i];
         const float all = total - cardPrefix[cards[l + 1] + l] - cardPrefix[cards[h + 1] + h] + reach[i];
         v[i] = stake * (weaker + upto - all);
+    }
+}
+
+// The all-in balance of a flop root (see SubgameTree::allInBalance), one work-item per hand pair, from
+// the hands' ranks on each of the flop's runouts ([runout * hands + hand], 0 for a hand holding one of the
+// runout's cards, otherwise higher for stronger hands). Only pairs i < j are counted; each fills both halves.
+__kernel void allInBalance(__global const ushort *ranks, uint hands, uint runouts, __global const uchar *low, __global const uchar *high,
+                           __global float *balance)
+{
+    const uint i = get_global_id(0), j = get_global_id(1);
+    if (i >= j)
+    {
+        if (i == j)
+        {
+            balance[i * hands + i] = 0.0f;
+        }
+        return;
+    }
+    int wins = 0;
+    if (low[i] != low[j] && low[i] != high[j] && high[i] != low[j] && high[i] != high[j])
+    {
+        for (uint r = 0; r < runouts; ++r)
+        {
+            const int mine = ranks[r * hands + i], theirs = ranks[r * hands + j];
+            wins += mine != 0 && theirs != 0 ? (mine > theirs) - (mine < theirs) : 0;
+        }
+    }
+    const float share = (float)wins / ALL_IN_RUNOUTS;
+    balance[i * hands + j] = share;
+    balance[j * hands + i] = -share;
+}
+
+// All-in values for player p on a flop root's own street, one work-group per all-in: the stake times the
+// opponent's reach weighted by each hand pair's balance over the runouts. The balance is antisymmetric,
+// so a hand reads its column, next to its neighbours' in memory, and negates. One thread per hand or
+// nearly: with 256 threads walking four or five columns each, a launch took three times as long.
+__kernel __attribute__((reqd_work_group_size(ALL_IN_GROUP, 1, 1))) void allIns(__global const Node *nodes, __global const uint *ids, uint p,
+                                                                               __global float *vec, __global const float *balance)
+{
+    __local float reach[MAX_HANDS];
+    const Node node = nodes[ids[get_group_id(0)]];
+    const uint n = node.hands, lid = get_local_id(0);
+    __global float *v = vec + node.vec;
+    __global const float *opponent = vec + node.reach[p];
+    for (uint i = lid; i < n; i += ALL_IN_GROUP)
+    {
+        reach[i] = opponent[i];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    const float stake = (float)((node.invested >> (16 * p)) & 0xFFFFu);
+    for (uint i = lid; i < n; i += ALL_IN_GROUP)
+    {
+        // Four opponent hands per step, so their reads overlap: one at a time took 2.5 times as long.
+        float4 sums = 0.0f;
+        uint j = 0;
+        for (; j + 4 <= n; j += 4)
+        {
+            __global const float *column = balance + j * n + i;
+            sums += (float4)(column[0], column[n], column[2 * n], column[3 * n]) * vload4(0, reach + j);
+        }
+        float sum = sums.x + sums.y + sums.z + sums.w;
+        for (; j < n; ++j)
+        {
+            sum += balance[j * n + i] * reach[j];
+        }
+        v[i] = -stake * sum;
     }
 }
 

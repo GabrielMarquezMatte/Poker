@@ -110,17 +110,18 @@ static void run(const std::string &name, const typename Hunl<C>::State &state, c
             setup.clear();
             solve.clear();
             const Tree &tree = solver.tree();
-            std::size_t folds = 0, showdowns = 0, chances = 0;
+            std::size_t folds = 0, showdowns = 0, chances = 0, allIns = 0;
             for (const auto &node : tree.nodes)
             {
                 folds += node.kind == Tree::Kind::fold;
                 showdowns += node.kind == Tree::Kind::showdown;
                 chances += node.kind == Tree::Kind::chance;
+                allIns += node.kind == Tree::Kind::allIn;
             }
-            std::cout << std::format("{}: {} nodes ({} decisions, {} chance, {} folds, {} showdowns), depth {}, {} hands, {} spaces, "
+            std::cout << std::format("{}: {} nodes ({} decisions, {} chance, {} folds, {} showdowns, {} all-ins), depth {}, {} hands, {} spaces, "
                                      "{:.1f}M regrets, {:.1f}M averages\n",
-                                     name, tree.nodes.size(), tree.nodes.size() - folds - showdowns - chances, chances, folds, showdowns,
-                                     tree.depth, tree.hands, tree.spaces.size(), static_cast<double>(tree.regrets) / 1e6,
+                                     name, tree.nodes.size(), tree.nodes.size() - folds - showdowns - chances - allIns, chances, folds, showdowns,
+                                     allIns, tree.depth, tree.hands, tree.spaces.size(), static_cast<double>(tree.regrets) / 1e6,
                                      static_cast<double>(tree.averages) / 1e6);
             GpuSubgameSolver<C> profiled(state, ranges, options, true);
             start = std::chrono::steady_clock::now();
@@ -133,10 +134,10 @@ static void run(const std::string &name, const typename Hunl<C>::State &state, c
     std::cout << std::format("  tree {:.0f} ms, upload {:.0f} ms, solve {:.0f} ms ({} iterations, {:.2f} ms each), total {:.0f} ms\n", 1e3 * tree,
                              1e3 * upload, 1e3 * solved, iterations, 1e3 * solved / static_cast<double>(iterations),
                              1e3 * (tree + upload + solved));
-    const double kernels = profile.forward + profile.folds + profile.showdowns + profile.backward;
-    std::cout << std::format("  profiled solve {:.0f} ms: forward {:.0f}, folds {:.0f}, showdowns {:.0f}, backward {:.0f}, outside kernels {:.0f}; "
+    const double kernels = profile.forward + profile.folds + profile.showdowns + profile.allIns + profile.backward;
+    std::cout << std::format("  profiled solve {:.0f} ms: forward {:.0f}, folds {:.0f}, showdowns {:.0f}, all-ins {:.0f}, backward {:.0f}, outside kernels {:.0f}; "
                              "{} launches ({:.0f} per iteration)\n",
-                             1e3 * profiledSolve, 1e3 * profile.forward, 1e3 * profile.folds, 1e3 * profile.showdowns, 1e3 * profile.backward,
+                             1e3 * profiledSolve, 1e3 * profile.forward, 1e3 * profile.folds, 1e3 * profile.showdowns, 1e3 * profile.allIns, 1e3 * profile.backward,
                              1e3 * (profiledSolve - kernels), profile.launches,
                              static_cast<double>(profile.launches) / static_cast<double>(iterations));
 }
@@ -169,7 +170,7 @@ int main(int argc, char **argv)
     }
     const auto iterations = static_cast<std::size_t>(options["--iterations"]), repeats = static_cast<std::size_t>(options["--repeats"]);
     // As SlumbotBot::resolve builds them.
-    const SubgameOptions flop{.averageLaterStreets = false, .minReach = 1e-3, .chanceSamples = 6, .allInSamples = 16};
+    const SubgameOptions flop{.averageLaterStreets = false, .minReach = 1e-3, .chanceSamples = 6, .allInSamples = 16, .exactFlopAllIns = true};
     const SubgameOptions turn{.averageLaterStreets = false, .minReach = 1e-3};
     run<Flop>("flop, limped pot", root<Flop>("Ks 8d 3c", 1, 2), flop, iterations, repeats);
     run<Flop>("flop, raised pot", root<Flop>("Ks 8d 3c", 1, 6), flop, iterations, repeats);

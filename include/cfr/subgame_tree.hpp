@@ -15,22 +15,30 @@ struct SubgameOptions
     bool averageLaterStreets = true;
     double minReach = 0.0;
     std::size_t chanceSamples = 0, allInSamples = 0;
+    bool exactFlopAllIns = false;
     std::optional<std::uint32_t> rootExtraAction; // chips the root's actor puts in, on top of the legal actions
 };
 
 // The strength rank of every hole pair on a five-card board: equal strengths share a rank, weaker hands
 // have lower ones (pairs holding a board card are left at 0). Trees sort a river's hands by it. The
 // runouts of different all-ins and the re-solves of a street ask for the same boards again and again,
-// so each thread keeps the last ones it ranked.
+// so each thread keeps the last ones it ranked: two generations, dropping the older one when the newer
+// fills up, so the boards of the flop being worked on are never dropped halfway. The reference holds
+// until the thread's next call.
 inline const std::array<std::uint16_t, holeCombos> &boardRanks(std::uint64_t board)
 {
-    thread_local std::unordered_map<std::uint64_t, std::array<std::uint16_t, holeCombos>> cache;
+    thread_local std::unordered_map<std::uint64_t, std::array<std::uint16_t, holeCombos>> cache, older;
     if (const auto it = cache.find(board); it != cache.end())
     {
         return it->second;
     }
-    if (cache.size() >= 2048) // a flop has 1176 runouts; ~5 MB
+    if (const auto it = older.find(board); it != older.end())
     {
+        return it->second;
+    }
+    if (cache.size() >= 2048) // a flop has 1176 runouts; ~5 MB a generation
+    {
+        older = std::move(cache);
         cache.clear();
     }
     std::vector<std::pair<ClassificationResult, std::uint16_t>> ranked;
@@ -54,12 +62,70 @@ inline const std::array<std::uint16_t, holeCombos> &boardRanks(std::uint64_t boa
     return ranks;
 }
 
+// For a flop, how every hole pair fares against every other when the board runs out, over all 1176
+// turn-and-river pairs: [i * holeCombos + j] is the runouts where hand i beats hand j minus those where it
+// loses (0 for pairs sharing a card or holding a flop card). Two such hands see `flopAllInRunouts` of them.
+// Each thread keeps its last flop: a street is re-solved on the same board.
+inline constexpr float flopAllInRunouts = 990.0f; // C(45, 2)
+inline const std::vector<std::int16_t> &flopAllInBalance(std::uint64_t flop)
+{
+    thread_local std::uint64_t cached = 0;
+    thread_local std::vector<std::int16_t> balance;
+    if (cached == flop && !balance.empty())
+    {
+        return balance;
+    }
+    cached = flop;
+    balance.assign(holeCombos * holeCombos, 0);
+    std::array<std::int16_t, holeCombos> live{}; // all ones for the hands a board leaves alive
+    const std::uint64_t deck = ((1ull << 52) - 1) & ~flop;
+    for (std::uint64_t turns = deck; turns != 0; turns &= turns - 1)
+    {
+        const std::uint64_t turn = turns & (~turns + 1);
+        for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
+        {
+            const std::uint64_t board = flop | turn | (rivers & (~rivers + 1));
+            const std::uint16_t *__restrict ranks = boardRanks(board).data();
+            for (std::size_t h = 0; h < holeCombos; ++h)
+            {
+                live[h] = (holes[h] & board) == 0 ? -1 : 0;
+            }
+            const std::int16_t *__restrict alive = live.data();
+            for (std::size_t i = 0; i < holeCombos; ++i)
+            {
+                if (alive[i] == 0)
+                {
+                    continue;
+                }
+                const std::uint16_t mine = ranks[i];
+                std::int16_t *__restrict row = balance.data() + i * holeCombos;
+                for (std::size_t j = i + 1; j < holeCombos; ++j) // the lower half is filled in at the end
+                {
+                    row[j] = static_cast<std::int16_t>(row[j] + (alive[j] & ((ranks[j] < mine) - (ranks[j] > mine))));
+                }
+            }
+        }
+    }
+    for (std::size_t i = 0; i < holeCombos; ++i)
+    {
+        for (std::size_t j = i + 1; j < holeCombos; ++j)
+        {
+            std::int16_t &upper = balance[i * holeCombos + j];
+            upper = (holes[i] & holes[j]) == 0 ? upper : std::int16_t{0};
+            balance[j * holeCombos + i] = static_cast<std::int16_t>(-upper);
+        }
+    }
+    return balance;
+}
+
 // The public tree of a postflop subgame of Hunl<C>, from a street's first decision to showdown, with the
 // hands each board leaves alive: what a vector-form CFR solver over exact hands iterates on.
 // Later board cards are chance nodes with one child per card. Every board has its own dense vector of
 // live hands (a space); on five cards it is sorted weakest first, so showdowns cost O(hands) via
 // per-card sums. Decision nodes own `actions * hands` regrets (and average strategy sums, if kept) at
 // their offsets, laid out [action * hands + hand].
+// With exact flop all-ins, an all-in called on a flop root's own street is a terminal too: its value takes
+// allInBalance(), not the runouts' subtrees.
 template <typename C>
 struct SubgameTree
 {
@@ -75,6 +141,7 @@ struct SubgameTree
         fold,
         showdown,
         chance,
+        allIn,
     };
     struct Node
     {
@@ -102,6 +169,7 @@ struct SubgameTree
     std::unordered_map<std::uint64_t, std::size_t> byHistory; // root-street nodes only
     std::vector<Space> spaces;                                // spaces[0] is the root's
     std::size_t regrets = 0, averages = 0;                    // floats needed
+    std::size_t allIns = 0;                                   // nodes of kind allIn
     std::size_t depth = 0;
 
     // `root` is a decision (usually a street's first); ranges[p] holds player p's reach for every hand.
@@ -110,11 +178,13 @@ struct SubgameTree
     // `averageLaterStreets`. With `chanceSamples` > 0, each chance node deals only that many cards, drawn
     // at random (seeded by the board and history, so the tree is reproducible); `allInSamples` does the
     // same for the board that runs out after an all-in, whose value is all there is to those subtrees (0
-    // deals every card). `rootExtraAction` adds an action at the root, after the legal ones (the child is
-    // G::applyTo(root, chips, number of legal actions)): a real bet the abstraction lacks.
+    // deals every card). `exactFlopAllIns` values the all-ins on a flop root's own street over every
+    // runout, with no subtree (nodes of kind allIn; ignored on other roots). `rootExtraAction` adds an
+    // action at the root, after the legal ones (the child is G::applyTo(root, chips, number of legal
+    // actions)): a real bet the abstraction lacks.
     SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, const SubgameOptions &options = {})
         : m_averageLaterStreets(options.averageLaterStreets), m_chanceSamples(options.chanceSamples), m_allInSamples(options.allInSamples),
-          m_rootExtraAction(options.rootExtraAction)
+          m_exactFlopAllIns(options.exactFlopAllIns && std::popcount(root.board) == 3), m_rootExtraAction(options.rootExtraAction)
     {
         const double minReach = options.minReach;
         const bool river = std::popcount(root.board) == 5;
@@ -153,6 +223,30 @@ struct SubgameTree
         }
         space.groups.push_back(hands);
         depth = build(root, root.board, 0, 0);
+    }
+
+    // The hole index (see holeIndex) of root-space hand i.
+    inline std::size_t holeOf(std::size_t i) const noexcept
+    {
+        return holeIndex((1ull << spaces.front().low[i]) | (1ull << spaces.front().high[i]));
+    }
+
+    // What the all-in nodes of a flop root pay: [i * hands + j] is the share of runouts where root-space
+    // hand i beats hand j minus the share where it loses (antisymmetric). Takes ~70 ms on a thread's first
+    // call for a flop (see flopAllInBalance).
+    std::vector<float> allInBalance() const
+    {
+        const auto &balance = flopAllInBalance(nodes.front().state.board);
+        std::vector<float> result(hands * hands);
+        for (std::size_t i = 0; i < hands; ++i)
+        {
+            const std::int16_t *row = balance.data() + holeOf(i) * holeCombos;
+            for (std::size_t j = 0; j < hands; ++j)
+            {
+                result[i * hands + j] = static_cast<float>(row[holeOf(j)]) / flopAllInRunouts;
+            }
+        }
+        return result;
     }
 
     // The average strategy in `sums` at a root-street state `s` (any Hunl state type: only its action
@@ -195,6 +289,7 @@ struct SubgameTree
 private:
     bool m_averageLaterStreets;
     std::size_t m_chanceSamples, m_allInSamples;
+    bool m_exactFlopAllIns;
     std::optional<std::uint32_t> m_rootExtraAction;
     std::map<std::pair<std::uint64_t, std::size_t>, std::size_t> m_spaceOf; // by board and parent space
 
@@ -272,6 +367,12 @@ private:
         if (G::isTerminal(s))
         {
             nodes[idx].kind = s.folder != G::nobody ? Kind::fold : Kind::showdown;
+            return level;
+        }
+        if (m_exactFlopAllIns && s.street == G::showdown && s.board == rootBoard)
+        {
+            nodes[idx].kind = Kind::allIn;
+            ++allIns;
             return level;
         }
         std::vector<std::size_t> children;

@@ -136,13 +136,13 @@ struct PostflopRaises : C
     static constexpr std::array<std::uint8_t, 4> allInOnlyRaises{255, 4, 4, 4}; // the 4th raise of a postflop street
 };
 
-// Iterations of each resolve; flops deal `flopSamples` cards per chance node, and `allInSamples` per
-// card of the runout after an all-in.
+// Iterations of each resolve; flops deal `flopSamples` cards per chance node, and `allInSamples` rivers
+// after an all-in on their turn. All-ins called on the flop are valued over every runout.
 struct SlumbotResolves
 {
     std::size_t flop = 60, turn = 60, river = 100;
     std::size_t flopSamples = 6;
-    std::size_t allInSamples = 16; // per card of a flop all-in's runout: 36 runouts misjudged all-ins by ~8% equity
+    std::size_t allInSamples = 16;
     bool nested = true;            // solve Slumbot's off-tree bets in; false translates them (to compare)
     double jitter = 0.0;           // scales our postflop bets and raises by up to +/- this (for local matches)
 };
@@ -404,6 +404,7 @@ private:
                                                                          .minReach = minReach,
                                                                          .chanceSamples = m_resolves.flopSamples,
                                                                          .allInSamples = m_resolves.allInSamples,
+                                                                         .exactFlopAllIns = true,
                                                                          .rootExtraAction = extra});
             m_solvers.flop->solve(m_resolves.flop);
         }

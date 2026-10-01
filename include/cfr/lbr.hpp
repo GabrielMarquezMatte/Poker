@@ -20,13 +20,13 @@ struct LbrResult
 // Which streets the evaluated strategy resolves, and with how many DCFR iterations (0 = play the
 // blueprint there). Each resolve starts from the ranges the strategy implies so far and solves to
 // showdown: rivers exactly, turns with a coarser river (CoarseRiver), flops with coarser turn and river
-// betting (CoarseTurn) dealing only `flopSamples` cards at each chance node. Later streets are resolved
-// again when reached.
+// betting (CoarseTurn) dealing only `flopSamples` cards at each chance node; all-ins called on the flop
+// are valued over every runout. Later streets are resolved again when reached.
 struct LbrResolves
 {
     std::size_t flop = 0, turn = 0, river = 0;
     std::size_t flopSamples = 8;
-    std::size_t allInSamples = 16; // per card of a flop all-in's runout
+    std::size_t allInSamples = 16; // rivers dealt after an all-in on a flop resolve's turn
 };
 
 // Local best response (Lisy & Bowling 2017): plays real hands against a strategy's average policy,
@@ -99,7 +99,8 @@ public:
                                                             SubgameOptions{.averageLaterStreets = false,
                                                                            .minReach = minReach,
                                                                            .chanceSamples = m_resolves.flopSamples,
-                                                                           .allInSamples = m_resolves.allInSamples});
+                                                                           .allInSamples = m_resolves.allInSamples,
+                                                                           .exactFlopAllIns = true});
                 solvers.flop->solve(m_resolves.flop);
             }
             if (m_resolves.turn > 0 && s.street == 2 && solvers.turn == nullptr)

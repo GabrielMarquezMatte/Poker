@@ -341,3 +341,87 @@ TEST(SubgameSolver, RiverSpacesAreSortedWeakestFirst)
         ASSERT_EQ(space.groups, groups);
     }
 }
+
+// The balance of two hands on a flop: the turn-and-river pairs the first wins minus those it loses.
+TEST(SubgameSolver, FlopAllInBalanceMatchesBruteForce)
+{
+    const std::uint64_t flop = Deck::parseHand("2c 7d 9h").getMask();
+    const auto &balance = flopAllInBalance(flop);
+    CfrRng rng{5};
+    std::size_t decided = 0;
+    for (std::size_t k = 0; k < 300; ++k)
+    {
+        const std::size_t i = rng() % holeCombos, j = rng() % holeCombos;
+        const std::uint64_t dead = flop | holes[i] | holes[j];
+        int expected = 0;
+        for (std::uint64_t turns = ((1ull << 52) - 1) & ~dead; turns != 0 && std::popcount(dead) == 7; turns &= turns - 1)
+        {
+            for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
+            {
+                const std::uint64_t board = flop | (turns & (~turns + 1)) | (rivers & (~rivers + 1));
+                const auto mine = Hand::classify(Deck::from_mask(holes[i] | board));
+                const auto theirs = Hand::classify(Deck::from_mask(holes[j] | board));
+                expected += mine > theirs ? 1 : (mine < theirs ? -1 : 0);
+            }
+        }
+        decided += expected != 0;
+        ASSERT_EQ(balance[i * holeCombos + j], expected) << i << " against " << j;
+        ASSERT_EQ(balance[j * holeCombos + i], -expected);
+    }
+    EXPECT_GT(decided, 150u);
+}
+
+// A called flop all-in is worth the same as a terminal with the balance as with every turn and river dealt.
+TEST(SubgameSolver, ExactFlopAllInsMatchEveryRunout)
+{
+    using Tree = SubgameTree<Hunl100bbConfig>;
+    auto root = turnRoot<Nl>("2c 7d 9h Js", 20);
+    root.board = Deck::parseHand("2c 7d 9h").getMask();
+    root.street = 1;
+    root.invested = {Hunl100bbConfig::stack, 20}; // player 1 faces an all-in: fold or call
+    root.actions = 1;
+    root.raises = 1;
+    CfrRng rng{11};
+    std::array<Hands, 2> ranges{};
+    double mass = 0.0;
+    for (auto &range : ranges)
+    {
+        for (auto &r : range)
+        {
+            r = (rng() % 4 == 0) ? 0.0 : static_cast<double>(rng() % 1000) / 1000.0;
+            mass += r / 2.0;
+        }
+    }
+    SubgameSolver<Hunl100bbConfig> dealt(root, ranges), exact(root, ranges, {.exactFlopAllIns = true});
+    const auto count = [](const Tree &tree, Tree::Kind kind)
+    { return std::ranges::count_if(tree.nodes, [kind](const auto &node) { return node.kind == kind; }); };
+    EXPECT_EQ(count(dealt.tree(), Tree::Kind::showdown), 49 * 48);
+    EXPECT_EQ(count(exact.tree(), Tree::Kind::allIn), 1);
+    EXPECT_EQ(count(exact.tree(), Tree::Kind::chance), 0);
+    const double tolerance = 1e-4 * Hunl100bbConfig::stack * mass;
+    for (std::size_t p = 0; p < 2; ++p)
+    {
+        const auto expected = dealt.bestResponseValues(p), actual = exact.bestResponseValues(p);
+        double largest = 0.0;
+        for (std::size_t h = 0; h < holeCombos; ++h)
+        {
+            ASSERT_NEAR(actual[h], expected[h], tolerance) << "player " << p << ", hand " << h;
+            largest = std::max(largest, std::abs(expected[h]));
+        }
+        EXPECT_GT(largest, 100.0 * tolerance); // the values are not all near zero
+    }
+    dealt.solve(5);
+    exact.solve(5);
+    EXPECT_NEAR(exact.exploitability(), dealt.exploitability(), 1e-3 * Hunl100bbConfig::stack);
+}
+
+// Only a flop root's own all-ins become terminals: a turn root deals its all-ins' rivers as before.
+TEST(SubgameSolver, ExactFlopAllInsLeaveOtherStreetsAlone)
+{
+    using Tree = SubgameTree<Hunl100bbConfig>;
+    Hands uniform{};
+    uniform.fill(1.0);
+    const Tree tree(turnRoot<Nl>("2c 7d 9h Js", 20), {uniform, uniform}, {.averageLaterStreets = false, .exactFlopAllIns = true});
+    EXPECT_TRUE(std::ranges::none_of(tree.nodes, [](const auto &node) { return node.kind == Tree::Kind::allIn; }));
+    EXPECT_EQ(tree.allIns, 0u);
+}

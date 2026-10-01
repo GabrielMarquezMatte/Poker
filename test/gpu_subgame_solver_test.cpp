@@ -11,6 +11,13 @@ struct GpuSmallTurn : Hunl100bbConfig
     static constexpr std::array<std::uint8_t, 4> maxRaises{3, 3, 1, 1};
 };
 
+// A pot-sized bet or all-in on the flop, then checks to showdown.
+struct GpuSmallFlop : Hunl100bbConfig
+{
+    static constexpr std::array<std::array<double, 3>, 4> raiseFractions{{{0.5, 1.0, 2.0}, {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}, {1.0, 0.0, 0.0}}};
+    static constexpr std::array<std::uint8_t, 4> maxRaises{3, 1, 0, 0};
+};
+
 template <typename G>
 typename G::State firstDecision(std::string_view board, std::uint8_t street)
 {
@@ -60,14 +67,15 @@ double largestDifference(const SubgameSolver<C> &cpu, const GpuSubgameSolver<C> 
 // differences grow where a hand's reach is near zero (its average strategy there barely matters), so
 // the solutions are compared by exploitability instead.
 template <typename C>
-void expectSameAsCpu(const typename Hunl<C>::State &root, const std::array<typename SubgameTree<C>::Hands, 2> &ranges, std::size_t iterations)
+void expectSameAsCpu(const typename Hunl<C>::State &root, const std::array<typename SubgameTree<C>::Hands, 2> &ranges, std::size_t iterations,
+                     const SubgameOptions &options = {})
 {
     if (Gpu::instance() == nullptr)
     {
         GTEST_SKIP() << "no OpenCL GPU";
     }
-    SubgameSolver<C> cpu(root, ranges);
-    GpuSubgameSolver<C> gpu(root, ranges);
+    SubgameSolver<C> cpu(root, ranges, options);
+    GpuSubgameSolver<C> gpu(root, ranges, options);
     cpu.solve(1);
     gpu.solve(1);
     EXPECT_LT(largestDifference(cpu, gpu), 1e-3);
@@ -100,4 +108,26 @@ TEST(GpuSubgameSolver, TurnMatchesCpu)
         }
     }
     expectSameAsCpu<GpuSmallTurn>(firstDecision<Hunl<GpuSmallTurn>>("2c 7d 9h Js", 2), ranges, 300);
+}
+
+// All-ins called on the flop are terminals valued over every runout; the other lines deal two cards a street.
+// A third of the hands are in neither range, so the tree's hands are not the flop's.
+TEST(GpuSubgameSolver, FlopAllInsMatchCpu)
+{
+    using Tree = SubgameTree<GpuSmallFlop>;
+    CfrRng rng{3};
+    std::array<Tree::Hands, 2> ranges{};
+    for (auto &range : ranges)
+    {
+        for (std::size_t h = 0; h < holeCombos; ++h)
+        {
+            range[h] = h % 3 == 0 ? 0.0 : static_cast<double>(1 + rng() % 1000) / 1000.0;
+        }
+    }
+    const auto root = firstDecision<Hunl<GpuSmallFlop>>("2c 7d 9h", 1);
+    const SubgameOptions options{.chanceSamples = 2, .exactFlopAllIns = true};
+    const Tree tree(root, ranges, options);
+    EXPECT_GT(tree.allIns, 1u);
+    EXPECT_LT(tree.hands, 800u);
+    expectSameAsCpu<GpuSmallFlop>(root, ranges, 300, options);
 }

@@ -75,14 +75,15 @@ struct Gpu
 // Seconds a profiled GpuSubgameSolver's kernels ran, by kind, and how many were launched.
 struct GpuProfile
 {
-    double forward = 0.0, folds = 0.0, showdowns = 0.0, backward = 0.0;
+    double forward = 0.0, folds = 0.0, showdowns = 0.0, allIns = 0.0, backward = 0.0;
     std::size_t launches = 0;
 };
 
 // SubgameSolver on the GPU: the same DCFR over the same SubgameTree, with everything the iterations
 // touch kept in device memory. Nodes are renumbered breadth first so each node's children are
 // contiguous; one traversal launches a kernel per level down (reach), one for the folds, one for the
-// showdowns, and one per level up (values and regrets), each over a level's nodes times their hands.
+// showdowns, one for the all-ins, and one per level up (values and regrets), each over a level's nodes
+// times their hands.
 // Going down skips the traverser's own decisions: they pass the opponent's reach on unchanged, so the
 // nodes below read it from the nearest ancestor holding it. Regrets are stored in half precision; only
 // the average strategy comes back.
@@ -101,7 +102,7 @@ public:
         : m_tree(root, ranges, options), m_gpu(*Gpu::instance()), m_profiled(profiled),
           m_queue(m_gpu.context, m_gpu.device, profiled ? CL_QUEUE_PROFILING_ENABLE : 0),
           m_forward(m_gpu.program, "forward"), m_folds(m_gpu.program, "folds"), m_showdowns(m_gpu.program, "showdowns"),
-          m_backward(m_gpu.program, "backward"),
+          m_allIns(m_gpu.program, "allIns"), m_backward(m_gpu.program, "backward"),
           m_averages(m_tree.averages, 0.0f)
     {
         upload();
@@ -140,6 +141,11 @@ public:
                     m_showdowns.setArg(2, p);
                     launch(m_showdowns, cl::NDRange(m_numShowdowns * group), cl::NDRange(group), &GpuProfile::showdowns);
                 }
+                if (m_numAllIns > 0)
+                {
+                    m_allIns.setArg(2, p);
+                    launch(m_allIns, cl::NDRange(m_numAllIns * allInGroup), cl::NDRange(allInGroup), &GpuProfile::allIns);
+                }
                 m_backward.setArg(3, p);
                 m_backward.setArg(6, positiveDiscount);
                 m_backward.setArg(7, m_scale[p]);
@@ -177,7 +183,7 @@ public:
     inline const GpuProfile &profile() const noexcept { return m_profile; }
 
 private:
-    static constexpr std::uint32_t group = 256, foldGroup = 64; // GROUP and FOLD_GROUP in the kernels
+    static constexpr std::uint32_t group = 256, foldGroup = 64, allInGroup = 1024; // the kernels' GROUP, FOLD_GROUP, ALL_IN_GROUP
     static constexpr std::uint32_t none = 0xFFFFFFFFu;
     static constexpr std::uint16_t noHand = 0xFFFFu;
 
@@ -198,14 +204,14 @@ private:
     GpuProfile m_profile;
     std::vector<std::pair<cl::Event, double GpuProfile::*>> m_events; // of the solve under way
     cl::CommandQueue m_queue;
-    cl::Kernel m_forward, m_folds, m_showdowns, m_backward;
+    cl::Kernel m_forward, m_folds, m_showdowns, m_allIns, m_backward;
     std::vector<float> m_averages;
     std::size_t m_iteration = 0;
     std::vector<std::pair<std::uint32_t, std::uint32_t>> m_internal; // range of m_internalIds per level
     std::array<std::vector<std::pair<std::uint32_t, std::uint32_t>>, 2> m_forwardLevels; // of m_forwardIds[p]
     std::array<cl::Buffer, 2> m_forwardIds; // m_internalIds without player p's decisions
-    std::uint32_t m_numFolds = 0, m_numShowdowns = 0;
-    cl::Buffer m_nodes, m_internalIds, m_foldIds, m_showdownIds, m_vec, m_regrets, m_averageSums;
+    std::uint32_t m_numFolds = 0, m_numShowdowns = 0, m_numAllIns = 0;
+    cl::Buffer m_nodes, m_internalIds, m_foldIds, m_showdownIds, m_allInIds, m_vec, m_regrets, m_averageSums;
     std::array<cl::Buffer, 2> m_ranges;
     // Regrets are stored in half precision times m_scale[p] for player p, which bounds them by a few
     // units: counterfactual values scale with the stack and the opponent's reach mass. Regret matching
@@ -247,6 +253,43 @@ private:
         return result;
     }
 
+    // SubgameTree::allInBalance computed on the device (the CPU takes ~70 ms for a new flop).
+    // `low` and `high` hold the spaces' cards, the root's first.
+    cl::Buffer allInBalance(const cl::Buffer &low, const cl::Buffer &high)
+    {
+        const std::size_t n = m_tree.hands;
+        const std::uint64_t flop = m_tree.nodes.front().state.board;
+        std::vector<std::uint16_t> hole(n), ranks;
+        for (std::size_t i = 0; i < n; ++i)
+        {
+            hole[i] = static_cast<std::uint16_t>(m_tree.holeOf(i));
+        }
+        ranks.reserve(1176 * n); // per runout
+        for (std::uint64_t turns = ((1ull << 52) - 1) & ~flop; turns != 0; turns &= turns - 1)
+        {
+            for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
+            {
+                const std::uint64_t runout = (turns & (~turns + 1)) | (rivers & (~rivers + 1));
+                const auto &board = boardRanks(flop | runout);
+                for (std::size_t i = 0; i < n; ++i)
+                {
+                    ranks.push_back((holes[hole[i]] & runout) == 0 ? static_cast<std::uint16_t>(board[hole[i]] + 1) : std::uint16_t{0});
+                }
+            }
+        }
+        cl::Buffer balance(m_gpu.context, CL_MEM_READ_WRITE, n * n * sizeof(float));
+        cl::Kernel kernel(m_gpu.program, "allInBalance");
+        const cl::Buffer runoutRanks = buffer(ranks);
+        kernel.setArg(0, runoutRanks);
+        kernel.setArg(1, static_cast<cl_uint>(n));
+        kernel.setArg(2, static_cast<cl_uint>(ranks.size() / n));
+        kernel.setArg(3, low);
+        kernel.setArg(4, high);
+        kernel.setArg(5, balance);
+        m_queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(n, n));
+        return balance;
+    }
+
     void upload()
     {
         using Kind = typename Tree::Kind;
@@ -272,7 +315,7 @@ private:
         }
 
         std::vector<GpuNode> gpuNodes(order.size());
-        std::vector<std::uint32_t> internalIds, foldIds, showdownIds;
+        std::vector<std::uint32_t> internalIds, foldIds, showdownIds, allInIds;
         std::array<std::vector<std::uint32_t>, 2> forwardIds;
         std::uint32_t vec = 0;
         for (const auto &[first, count] : levels)
@@ -308,6 +351,10 @@ private:
                 {
                     showdownIds.push_back(g);
                 }
+                else if (node.kind == Kind::allIn)
+                {
+                    allInIds.push_back(g);
+                }
                 else
                 {
                     internalIds.push_back(g);
@@ -340,6 +387,7 @@ private:
         }
         m_numFolds = static_cast<std::uint32_t>(foldIds.size());
         m_numShowdowns = static_cast<std::uint32_t>(showdownIds.size());
+        m_numAllIns = static_cast<std::uint32_t>(allInIds.size());
 
         // Spaces: per-hand arrays, per-card hand lists and inverse maps into parent spaces.
         std::vector<std::size_t> parentSpace(spaces.size(), 0);
@@ -448,6 +496,7 @@ private:
         }
         m_foldIds = buffer(foldIds);
         m_showdownIds = buffer(showdownIds);
+        m_allInIds = buffer(allInIds);
         m_vec = zeros(vec);
         m_regrets = zeros<std::uint16_t>(m_tree.regrets); // half precision, scaled (see m_scale)
         for (std::size_t p = 0; p < 2; ++p)
@@ -502,6 +551,13 @@ private:
         m_showdowns.setArg(13, keep(buffer(highBefore)));
         m_showdowns.setArg(14, keep(buffer(highUpto)));
         m_showdowns.setArg(15, lists);
+        m_allIns.setArg(0, m_nodes);
+        m_allIns.setArg(1, m_allInIds);
+        m_allIns.setArg(3, m_vec);
+        if (m_numAllIns > 0)
+        {
+            m_allIns.setArg(4, keep(allInBalance(lows, highs)));
+        }
         m_backward.setArg(0, m_nodes);
         m_backward.setArg(1, m_internalIds);
         m_backward.setArg(4, m_vec);

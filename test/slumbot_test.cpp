@@ -193,7 +193,7 @@ TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
     SlumbotBot<Blueprint200Config> small(preflop, resolves, 3), big(preflop, resolves, 4);
     CfrRng rng{13};
     std::array<int, 4> decisions{};
-    for (int hand = 0; hand < 40; ++hand)
+    for (int hand = 0; hand < 100; ++hand)
     {
         Deck deck = Deck::createFullDeck();
         const std::array<std::uint64_t, 2> hands{deck.popPair(rng).getMask(), deck.popPair(rng).getMask()};
@@ -217,5 +217,5 @@ TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
         }
     }
     EXPECT_GT(decisions[1], 0); // postflop, where jittered bets fall off the tree
-    EXPECT_GT(decisions[2], 0);
+    EXPECT_GT(decisions[2], 0); // about one hand in thirty gets past the flop
 }
