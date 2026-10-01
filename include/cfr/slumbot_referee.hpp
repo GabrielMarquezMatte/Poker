@@ -110,7 +110,7 @@ struct SlumbotReferee
         if (allInEquity && allInStreet >= 0 && allInStreet < 3)
         {
             std::uint64_t known = 0;
-            for (int i = 0; i < std::array<int, 3>{0, 3, 4}[static_cast<std::size_t>(allInStreet)]; ++i)
+            for (int i = 0; i < cardsOnBoard[static_cast<std::size_t>(allInStreet)]; ++i)
             {
                 known |= order[static_cast<std::size_t>(i)];
             }
@@ -127,7 +127,7 @@ struct SlumbotReferee
         std::vector<std::uint64_t> live;
         for (std::uint64_t c = ((1ull << 52) - 1) & ~(mine | theirs | board); c != 0; c &= c - 1)
         {
-            live.push_back(c & (~c + 1));
+            live.push_back(lowestBit(c));
         }
         double won = 0.0, total = 0.0;
         const auto run = [&](auto &self, std::size_t from, int missing, std::uint64_t b) -> void

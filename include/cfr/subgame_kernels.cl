@@ -14,11 +14,7 @@
 #define MAX_ACTIONS 8
 #define NONE 0xFFFFFFFFu
 #define NO_HAND 0xFFFFu
-#define DECISION 0
-#define FOLD 1
-#define SHOWDOWN 2
-#define CHANCE 3
-#define ALL_IN 4
+#define CHANCE 3 // Node.kind of a chance node (SubgameTree::Kind)
 
 typedef struct
 {

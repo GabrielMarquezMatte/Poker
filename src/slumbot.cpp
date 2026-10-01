@@ -1,8 +1,7 @@
 // Plays heads-up against Slumbot (slumbot.com) through its public API: the 200bb blueprint preflop,
 // resolving after the flop. One hand at a time; results go to a CSV, one line per hand.
-#include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/gpu_subgame_solver.hpp"
-#include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/tools.hpp"
 #include <chrono>
 #include <cmath>
 #include <drogon/HttpClient.h>
@@ -210,45 +209,20 @@ int main(int argc, char **argv)
     std::map<std::string, double> options{{"--hands", 100.0},       {"--flop-iterations", 60.0}, {"--turn-iterations", 60.0},
                                           {"--river-iterations", 100.0}, {"--flop-samples", 6.0},    {"--gpu", 1.0},
                                           {"--sessions", 1.0}};
-    bool valid = argc >= 4 && argc % 2 == 0;
-    for (int i = 4; valid && i + 1 < argc; i += 2)
+    if (!parseOptions(argc, argv, 4, options))
     {
-        valid = options.contains(argv[i]);
-        if (valid)
-        {
-            options[argv[i]] = std::stod(argv[i + 1]);
-        }
-    }
-    if (!valid)
-    {
-        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint200.bin> <results.csv>";
-        for (const auto &[name, value] : options)
-        {
-            std::cerr << " [" << name << ' ' << value << ']';
-        }
-        std::cerr << "\n  plays --hands hands against Slumbot over --sessions concurrent sessions (keep it small: it is a free\n"
+        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint200.bin> <results.csv>" << optionsUsage(options)
+                  << "\n  plays --hands hands against Slumbot over --sessions concurrent sessions (keep it small: it is a free\n"
                      "  service), appending client_pos,action,winnings,hole,board,slumbot_hole,nudges,seed,decisions per hand to\n"
                      "  results.csv (decisions: ours in order, ';' apart, each option as incr:probability, the one taken starred)\n";
         return 1;
     }
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    const auto preflop = abstraction != nullptr ? loadPreflop(*abstraction, argv[2]) : nullptr;
+    if (preflop == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << '\n';
         return 1;
     }
-    BlueprintConfig::abstraction = abstraction.get();
-    std::unique_ptr<PreflopStrategy<Blueprint200>> preflop;
-    {
-        const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(blueprintCapacity<Blueprint200>(*abstraction));
-        if (!blueprint->load(argv[2]))
-        {
-            std::cerr << "cannot load blueprint " << argv[2] << " (train one with Poker_Train --stack-bb 200)\n";
-            return 1;
-        }
-        preflop = std::make_unique<PreflopStrategy<Blueprint200>>(*blueprint);
-        std::cerr << "blueprint: " << blueprint->iterations() << " iterations; kept its " << preflop->size() << " preflop infosets\n";
-    } // the rest of the table is only read postflop, which the bot resolves
     if (options["--gpu"] != 0.0)
     {
         if (Gpu::instance() == nullptr)

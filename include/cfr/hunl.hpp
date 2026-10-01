@@ -95,7 +95,7 @@ struct Hunl
 
     static bool isChance(const State &s)
     {
-        return !s.dealt || std::popcount(s.board) < boardSize[s.street];
+        return !s.dealt || std::popcount(s.board) < cardsOnBoard[s.street];
     }
 
     static State sampleChance(const State &s, CfrRng &rng)
@@ -240,8 +240,6 @@ struct Hunl
     }
 
 private:
-    static constexpr std::array<int, 5> boardSize{0, 3, 4, 5, 5};
-
     static void preflopKeys(const State &s, std::vector<std::uint64_t> &keys)
     {
         if (isTerminal(s) || s.street != 0)

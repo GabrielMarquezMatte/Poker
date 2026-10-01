@@ -171,10 +171,10 @@ inline constexpr void forEachPair(std::uint64_t cards, F &&f)
 {
     for (; cards; cards &= cards - 1)
     {
-        const std::uint64_t lowest = cards & (~cards + 1);
+        const std::uint64_t lowest = lowestBit(cards);
         for (std::uint64_t rest = cards & (cards - 1); rest; rest &= rest - 1)
         {
-            f(lowest | (rest & (~rest + 1)));
+            f(lowest | (lowestBit(rest)));
         }
     }
 }
@@ -195,7 +195,7 @@ inline constexpr void forEachCombination(std::uint64_t cards, std::size_t k, std
     }
     for (; static_cast<std::size_t>(std::popcount(cards)) >= k; cards &= cards - 1)
     {
-        const std::uint64_t lowest = cards & (~cards + 1);
+        const std::uint64_t lowest = lowestBit(cards);
         forEachCombination(cards & (cards - 1), k - 1, chosen | lowest, f);
     }
 }

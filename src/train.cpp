@@ -1,6 +1,6 @@
 // Trains the HU NLHE blueprint: multithreaded MCCFR in fixed-time blocks, a Linear CFR discount
 // after each block, periodic checkpoints, and resume from an existing blueprint file.
-#include "../include/cfr/blueprint.hpp"
+#include "../include/cfr/tools.hpp"
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -49,33 +49,18 @@ int main(int argc, char **argv)
                                           {"--checkpoint-blocks", 10.0},
                                           {"--prune-threshold", 0.0},
                                           {"--prune-after-blocks", 10.0}};
-    bool valid = argc >= 3 && argc % 2 == 1;
-    for (int i = 3; valid && i + 1 < argc; i += 2)
+    if (!parseOptions(argc, argv, 3, options))
     {
-        valid = options.contains(argv[i]);
-        if (valid)
-        {
-            options[argv[i]] = std::stod(argv[i + 1]);
-        }
-    }
-    if (!valid)
-    {
-        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin>";
-        for (const auto &[name, value] : options)
-        {
-            std::cerr << " [" << name << ' ' << value << ']';
-        }
-        std::cerr << "\n  --prune-threshold < 0 enables regret-based pruning once the blueprint has --prune-after-blocks blocks\n"
+        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin>" << optionsUsage(options)
+                  << "\n  --prune-threshold < 0 enables regret-based pruning once the blueprint has --prune-after-blocks blocks\n"
                      "  --stack-bb is 100 or 200 (Slumbot's depth)\n";
         return 1;
     }
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    if (abstraction == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << " (generate it with Poker_Abstraction)\n";
         return 1;
     }
-    BlueprintConfig::abstraction = abstraction.get();
     if (options["--stack-bb"] == 200.0)
     {
         return train<Blueprint200>(*abstraction, argv[2], options);

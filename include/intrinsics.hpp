@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <bit>
 #include <immintrin.h>
+// The lowest set bit of a mask (0 for 0): the next card of a set of cards.
+inline constexpr std::uint64_t lowestBit(std::uint64_t x) noexcept { return x & (~x + 1); }
 template<typename T> requires std::is_unsigned_v<T>
 static inline constexpr T pdep_software(T x, T mask) noexcept
 {

@@ -1,13 +1,11 @@
 cmake_minimum_required(VERSION 4.2)
-project(Poker VERSION 0.1.0 LANGUAGES C CXX)
+project(Poker VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enable CTest/CTest dashboard integration and test discovery
-include(CTest)
-enable_testing()
+include(CTest) # enables testing; test/ registers the tests
 
 if(MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /WX /arch:AVX2")

@@ -1,9 +1,8 @@
 // Benchmark of the GPU subgame solver on the trees the Slumbot bot resolves: for each workload, the
 // tree's size, the time to build it, to upload it and to solve it, and where the solve's time goes by
 // kernel. Also reports what the OpenCL device supports. Ranges are pseudo-random, so every hand stays in.
-#include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/gpu_subgame_solver.hpp"
-#include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/tools.hpp"
 #include <algorithm>
 #include <chrono>
 #include <format>
@@ -145,16 +144,7 @@ static void run(const std::string &name, const typename Hunl<C>::State &state, c
 int main(int argc, char **argv)
 {
     std::map<std::string, double> options{{"--iterations", 60.0}, {"--repeats", 5.0}, {"--device", 0.0}};
-    bool valid = argc % 2 == 1;
-    for (int i = 1; valid && i + 1 < argc; i += 2)
-    {
-        valid = options.contains(argv[i]);
-        if (valid)
-        {
-            options[argv[i]] = std::stod(argv[i + 1]);
-        }
-    }
-    if (!valid)
+    if (!parseOptions(argc, argv, 1, options))
     {
         std::cerr << "usage: " << argv[0] << " [--iterations 60] [--repeats 5] [--device 0|1 (1 describes the OpenCL device)]\n";
         return 1;

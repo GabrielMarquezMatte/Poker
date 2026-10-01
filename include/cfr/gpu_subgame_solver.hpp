@@ -265,18 +265,13 @@ private:
             hole[i] = static_cast<std::uint16_t>(m_tree.holeOf(i));
         }
         ranks.reserve(1176 * n); // per runout
-        for (std::uint64_t turns = ((1ull << 52) - 1) & ~flop; turns != 0; turns &= turns - 1)
-        {
-            for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
+        forEachPair(((1ull << 52) - 1) & ~flop, [&](std::uint64_t runout)
+                    {
+            const auto &board = boardRanks(flop | runout);
+            for (std::size_t i = 0; i < n; ++i)
             {
-                const std::uint64_t runout = (turns & (~turns + 1)) | (rivers & (~rivers + 1));
-                const auto &board = boardRanks(flop | runout);
-                for (std::size_t i = 0; i < n; ++i)
-                {
-                    ranks.push_back((holes[hole[i]] & runout) == 0 ? static_cast<std::uint16_t>(board[hole[i]] + 1) : std::uint16_t{0});
-                }
-            }
-        }
+                ranks.push_back((holes[hole[i]] & runout) == 0 ? static_cast<std::uint16_t>(board[hole[i]] + 1) : std::uint16_t{0});
+            } });
         cl::Buffer balance(m_gpu.context, CL_MEM_READ_WRITE, n * n * sizeof(float));
         cl::Kernel kernel(m_gpu.program, "allInBalance");
         const cl::Buffer runoutRanks = buffer(ranks);

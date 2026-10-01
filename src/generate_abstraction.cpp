@@ -83,10 +83,10 @@ static RiverStrength riverStrength(std::uint64_t hole, std::uint64_t board, cons
     std::array<std::uint32_t, opponentClusters> total{};
     for (std::uint64_t a = fullDeck & ~(hole | board); a != 0; a &= a - 1)
     {
-        const std::uint64_t first = a & (~a + 1);
+        const std::uint64_t first = lowestBit(a);
         for (std::uint64_t b = a & (a - 1); b != 0; b &= b - 1)
         {
-            const std::uint64_t opponent = first | (b & (~b + 1));
+            const std::uint64_t opponent = first | (lowestBit(b));
             const ClassificationResult theirs = Hand::classify(Deck::from_mask(opponent | board));
             const std::size_t cluster = clusterOf[pairIndex(opponent)];
             points[cluster] += mine > theirs ? 2u : (mine == theirs ? 1u : 0u);
@@ -204,7 +204,7 @@ static Cdf runoutCdf(std::uint64_t hole, std::uint64_t board, const HandIndexer 
     const std::uint64_t rest = fullDeck & ~(hole | board);
     for (std::uint64_t a = rest; a != 0; a &= a - 1)
     {
-        const std::uint64_t first = a & (~a + 1);
+        const std::uint64_t first = lowestBit(a);
         if (std::popcount(board) == 4)
         {
             add(board | first);
@@ -212,7 +212,7 @@ static Cdf runoutCdf(std::uint64_t hole, std::uint64_t board, const HandIndexer 
         }
         for (std::uint64_t b = a & (a - 1); b != 0; b &= b - 1)
         {
-            add(board | first | (b & (~b + 1)));
+            add(board | first | (lowestBit(b)));
         }
     }
     Cdf cdf{};

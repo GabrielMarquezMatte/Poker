@@ -5,6 +5,8 @@
 #include "intrinsics.hpp"
 #include "card.hpp"
 #include "random.hpp"
+// Cards on the board by street: preflop, flop, turn, river, and once the betting is over.
+inline constexpr std::array<int, 5> cardsOnBoard{0, 3, 4, 5, 5};
 struct Deck
 {
 private:

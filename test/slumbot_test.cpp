@@ -142,7 +142,7 @@ TEST(Slumbot, PlaysLegallyAgainstRandomActions)
             {
                 const auto actions = parseSlumbotActions(referee.action);
                 ASSERT_TRUE(actions.has_value()) << referee.action;
-                const std::vector<std::uint64_t> seen(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[referee.street]);
+                const std::vector<std::uint64_t> seen(board.begin(), board.begin() + cardsOnBoard[referee.street]);
                 const auto incr = bot.update(*actions, seen);
                 ASSERT_TRUE(incr.has_value()) << "hand " << hand << ": no answer after " << referee.action;
                 ASSERT_TRUE(referee.apply(*incr)) << "hand " << hand << ": illegal " << *incr << " after " << referee.action;
@@ -189,7 +189,7 @@ TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
 {
     const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
     const PreflopStrategy<Blueprint200> preflop(*blueprint);
-    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2, .nested = true, .jitter = 0.3};
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .jitter = 0.3};
     SlumbotBot<Blueprint200Config> small(preflop, resolves, 3), big(preflop, resolves, 4);
     CfrRng rng{13};
     std::array<int, 4> decisions{};
@@ -208,7 +208,7 @@ TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
         while (!referee.done)
         {
             auto &bot = referee.pos == 1 ? small : big;
-            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[referee.street]);
+            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + cardsOnBoard[referee.street]);
             const auto incr = bot.update(*parseSlumbotActions(referee.action), seen);
             ASSERT_TRUE(incr.has_value()) << "hand " << hand << ": no answer after " << referee.action;
             ASSERT_TRUE(referee.apply(*incr)) << "hand " << hand << ": illegal " << *incr << " after " << referee.action;
@@ -226,7 +226,7 @@ TEST(Slumbot, HandSeedsFixTheDraws)
 {
     const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
     const PreflopStrategy<Blueprint200> preflop(*blueprint);
-    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2, .nested = true, .jitter = 0.3};
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .jitter = 0.3};
     SlumbotBot<Blueprint200Config> first(preflop, resolves, 3), second(preflop, resolves, 4);
     const auto play = [](auto &sb, auto &bb, const std::array<std::uint64_t, 2> &hands, const std::vector<std::uint64_t> &board,
                          const std::array<std::uint64_t, 2> &seeds)
@@ -237,7 +237,7 @@ TEST(Slumbot, HandSeedsFixTheDraws)
         while (!referee.done)
         {
             auto &bot = referee.pos == 1 ? sb : bb;
-            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[referee.street]);
+            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + cardsOnBoard[referee.street]);
             const auto incr = bot.update(*parseSlumbotActions(referee.action), seen);
             if (!incr.has_value() || !referee.apply(*incr))
             {
@@ -272,7 +272,7 @@ TEST(Slumbot, ReplayShowsTheDecisionsPlayed)
     using Bot = SlumbotBot<Blueprint200Config>;
     const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
     const PreflopStrategy<Blueprint200> preflop(*blueprint);
-    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2};
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2};
     Bot small(preflop, resolves, 3), big(preflop, resolves, 4), again(preflop, resolves, 5);
     CfrRng rng{23};
     std::size_t postflop = 0;
@@ -285,7 +285,7 @@ TEST(Slumbot, ReplayShowsTheDecisionsPlayed)
         {
             board.push_back(deck.popRandomCards(rng, 1).getMask());
         }
-        const auto dealt = [&](int street) { return std::vector<std::uint64_t>(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[street]); };
+        const auto dealt = [&](int street) { return std::vector<std::uint64_t>(board.begin(), board.begin() + cardsOnBoard[street]); };
         const std::uint64_t seed = rng();
         small.newHand(0, hands[1], seed);
         big.newHand(1, hands[0]);

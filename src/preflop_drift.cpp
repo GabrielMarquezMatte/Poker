@@ -3,8 +3,7 @@
 // checkpoint reaches it (card removal ignored). Preflop is all the bot reads from the blueprint, so a
 // small distance means more training of the same game no longer changes how the bot plays. The coarse
 // distance merges the raise sizes: what is left of it is not hands trading one size for another.
-#include "../include/cfr/blueprint.hpp"
-#include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/tools.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -86,17 +85,6 @@ static void walk(const Preflop &a, const Preflop &b, const G::State &s, const Re
     }
 }
 
-static std::unique_ptr<Preflop> loadPreflop(const CardAbstraction &abstraction, const std::string &path)
-{
-    const auto blueprint = std::make_unique<Mccfr<G>>(blueprintCapacity<G>(abstraction));
-    if (!blueprint->load(path))
-    {
-        return nullptr;
-    }
-    std::cerr << path << ": " << blueprint->iterations() << " iterations, " << blueprint->discounts() << " blocks\n";
-    return std::make_unique<Preflop>(*blueprint);
-}
-
 int main(int argc, char **argv)
 {
     if (argc != 4)
@@ -104,18 +92,15 @@ int main(int argc, char **argv)
         std::cerr << "usage: " << argv[0] << " <abstraction.bin> <earlier.bin> <later.bin>\n";
         return 1;
     }
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    if (abstraction == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << '\n';
         return 1;
     }
-    BlueprintConfig::abstraction = abstraction.get();
     const auto earlier = loadPreflop(*abstraction, argv[2]); // one table in memory at a time
     const auto later = earlier != nullptr ? loadPreflop(*abstraction, argv[3]) : nullptr;
     if (later == nullptr)
     {
-        std::cerr << "cannot load a blueprint\n";
         return 1;
     }
 

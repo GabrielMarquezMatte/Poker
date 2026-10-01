@@ -26,7 +26,6 @@ struct LbrResolves
 {
     std::size_t flop = 0, turn = 0, river = 0;
     std::size_t flopSamples = 8;
-    std::size_t allInSamples = 16; // rivers dealt after an all-in on a flop resolve's turn
 };
 
 // Local best response (Lisy & Bowling 2017): plays real hands against a strategy's average policy,
@@ -99,7 +98,7 @@ public:
                                                             SubgameOptions{.averageLaterStreets = false,
                                                                            .minReach = minReach,
                                                                            .chanceSamples = m_resolves.flopSamples,
-                                                                           .allInSamples = m_resolves.allInSamples,
+                                                                           .allInSamples = 16, // rivers after an all-in on its turn
                                                                            .exactFlopAllIns = true});
                 solvers.flop->solve(m_resolves.flop);
             }
@@ -311,7 +310,7 @@ private:
         {
             for (std::uint64_t c = live; c != 0; c &= c - 1)
             {
-                boards.push_back(s.board | (c & (~c + 1)));
+                boards.push_back(s.board | (lowestBit(c)));
             }
         }
         else

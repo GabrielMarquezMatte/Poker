@@ -136,16 +136,35 @@ struct PostflopRaises : C
     static constexpr std::array<std::uint8_t, 4> allInOnlyRaises{255, 4, 4, 4}; // the 4th raise of a postflop street
 };
 
-// Iterations of each resolve; flops deal `flopSamples` cards per chance node, and `allInSamples` rivers
-// after an all-in on their turn. All-ins called on the flop are valued over every runout.
+// Iterations of each resolve; flops deal `flopSamples` cards per chance node. All-ins called on the flop
+// are valued over every runout.
 struct SlumbotResolves
 {
     std::size_t flop = 60, turn = 60, river = 100;
     std::size_t flopSamples = 6;
-    std::size_t allInSamples = 16;
-    bool nested = true;            // solve Slumbot's off-tree bets in; false translates them (to compare)
-    double jitter = 0.0;           // scales our postflop bets and raises by up to +/- this (for local matches)
+    double jitter = 0.0; // scales our postflop bets and raises by up to +/- this (for local matches)
 };
+
+// Cards as Slumbot writes them, "AsKd7c": one mask per card in order, and the text of a mask's cards.
+inline std::vector<std::uint64_t> parseCards(std::string_view text)
+{
+    std::vector<std::uint64_t> out;
+    for (std::size_t i = 0; i + 1 < text.size(); i += 2)
+    {
+        out.push_back(Deck::parseHand(text.substr(i, 2)).getMask());
+    }
+    return out;
+}
+inline std::string cardsText(std::uint64_t mask)
+{
+    std::string out;
+    for (const Card card : Deck::from_mask(mask))
+    {
+        out += "23456789TJQKA"[getRankIndex(card.getRank())];
+        out += "hdcs"[getSuitIndex(card.getSuit())];
+    }
+    return out;
+}
 
 // Plays Slumbot's game with a blueprint of Hunl<C> (C::stack must be 400): the blueprint's preflop, with
 // Slumbot's bets translated into the abstraction, and resolves after the flop. Postflop, a street is
@@ -257,7 +276,6 @@ private:
     using Strategy = typename Mccfr<G>::Strategy;                      // the blueprint's
     using Resolved = typename SubgameTree<PostflopRaises<C>>::Strategy; // a resolve's: may have an extra action
     static constexpr double minReach = 1e-3;
-    static constexpr std::array<int, 5> boardSize{0, 3, 4, 5, 5};
 
     // The current street's resolve and the node of its tree matching the real state, while on the tree.
     struct Solvers
@@ -330,7 +348,7 @@ private:
     void setBoard(const std::vector<std::uint64_t> &board)
     {
         std::uint64_t mask = 0;
-        for (int i = 0; i < boardSize[std::min<std::size_t>(m_real.street, 4)] && i < static_cast<int>(board.size()); ++i)
+        for (int i = 0; i < cardsOnBoard[std::min<std::size_t>(m_real.street, 4)] && i < static_cast<int>(board.size()); ++i)
         {
             mask |= board[static_cast<std::size_t>(i)];
         }
@@ -366,12 +384,11 @@ private:
         return std::clamp(m_streetStart + chips, minimum, C::stack);
     }
 
-    // The actions of `s` standing for putting `to` in, with their weights: fold and check/call exactly,
-    // a raise by its fraction of the pot after calling in the real game (`fraction`).
-    template <typename Game>
-    static std::vector<std::pair<std::size_t, double>> translate(const typename Game::State &s, std::uint32_t to, double fraction)
+    // The blueprint actions at `s` standing for putting `to` in, with their weights: fold and check/call
+    // exactly, a raise by its fraction of the pot after calling in the real game (`fraction`).
+    static std::vector<std::pair<std::size_t, double>> translate(const typename G::State &s, std::uint32_t to, double fraction)
     {
-        const auto legal = Game::legalActions(s);
+        const auto legal = G::legalActions(s);
         const std::uint32_t facing = std::max(s.invested[0], s.invested[1]);
         std::vector<std::pair<std::size_t, double>> raises;
         for (std::size_t a = 0; a < legal.size; ++a)
@@ -468,7 +485,7 @@ private:
                                                           SubgameOptions{.averageLaterStreets = false,
                                                                          .minReach = minReach,
                                                                          .chanceSamples = m_resolves.flopSamples,
-                                                                         .allInSamples = m_resolves.allInSamples,
+                                                                         .allInSamples = 16, // rivers after an all-in on its turn
                                                                          .exactFlopAllIns = true,
                                                                          .rootExtraAction = extra});
             m_solvers.flop->solve(m_resolves.flop);
@@ -527,7 +544,7 @@ private:
         Range &weights = actor == m_seat ? m_beliefs : m_range;
         if (m_real.street == 0)
         {
-            auto options = m_abstractLost ? std::vector<std::pair<std::size_t, double>>{} : translate<G>(m_abstract, to, fraction);
+            auto options = m_abstractLost ? std::vector<std::pair<std::size_t, double>>{} : translate(m_abstract, to, fraction);
             if (actor == m_seat && m_ourAbstract.has_value())
             {
                 options = {{*m_ourAbstract, 1.0}}; // exactly what we chose, not a translation of its rounding
@@ -573,16 +590,6 @@ private:
             {
                 // Our jittered bet: our range follows the action we chose; the next resolve starts from the real state.
                 condition(weights, {{*m_ourIndex, 1.0}}, [&](std::size_t h) { return resolvedStrategy(h); });
-                m_solvers.onTree = false;
-            }
-            else if (!m_resolves.nested && !index.has_value())
-            {
-                // Translation: the bet's probability from the nearest sizes, then a resolve after it.
-                if (!m_solvers.onTree)
-                {
-                    resolve();
-                }
-                condition(weights, translate<R>(m_solvers.node, to, fraction), [&](std::size_t h) { return resolvedStrategy(h); });
                 m_solvers.onTree = false;
             }
             else if (!index.has_value())

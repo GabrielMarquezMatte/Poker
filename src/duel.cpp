@@ -3,9 +3,8 @@
 // where the bots' strategies do (the luck of the cards and of the draws cancels), and all-ins before the
 // river score their equity. Reports bot A's winnings against bot B in mbb/hand; --csv <file> also writes
 // every pair's cards, both hands' actions and A's chips in each.
-#include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/gpu_subgame_solver.hpp"
-#include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/tools.hpp"
 #include "../include/cfr/slumbot_referee.hpp"
 #include <atomic>
 #include <chrono>
@@ -20,29 +19,6 @@
 #include <vector>
 
 using Bot = SlumbotBot<Blueprint200Config, GpuSubgameSolver>;
-
-static std::unique_ptr<PreflopStrategy<Blueprint200>> loadPreflop(const CardAbstraction &abstraction, const std::string &path)
-{
-    const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(blueprintCapacity<Blueprint200>(abstraction));
-    if (!blueprint->load(path))
-    {
-        return nullptr;
-    }
-    std::cerr << path << ": " << blueprint->iterations() << " iterations\n";
-    return std::make_unique<PreflopStrategy<Blueprint200>>(*blueprint);
-}
-
-// The cards of a mask as Slumbot writes them: "AsKd".
-static std::string cards(std::uint64_t mask)
-{
-    std::string out;
-    for (const Card card : Deck::from_mask(mask))
-    {
-        out += "23456789TJQKA"[getRankIndex(card.getRank())];
-        out += "hdcs"[getSuitIndex(card.getSuit())];
-    }
-    return out;
-}
 
 struct Played
 {
@@ -62,7 +38,7 @@ static std::optional<Played> playHand(Bot &sb, Bot &bb, const std::array<std::ui
     {
         Bot &bot = referee.pos == 1 ? sb : bb;
         const auto actions = parseSlumbotActions(referee.action);
-        const std::vector<std::uint64_t> seen(order.begin(), order.begin() + std::array<int, 4>{0, 3, 4, 5}[static_cast<std::size_t>(referee.street)]);
+        const std::vector<std::uint64_t> seen(order.begin(), order.begin() + cardsOnBoard[static_cast<std::size_t>(referee.street)]);
         const auto incr = bot.update(*actions, seen);
         if (!incr.has_value() || !referee.apply(*incr))
         {
@@ -84,8 +60,6 @@ int main(int argc, char **argv)
         options[std::string(side) + "turn-iterations"] = static_cast<double>(defaults.turn);
         options[std::string(side) + "river-iterations"] = static_cast<double>(defaults.river);
         options[std::string(side) + "flop-samples"] = static_cast<double>(defaults.flopSamples);
-        options[std::string(side) + "all-in-samples"] = static_cast<double>(defaults.allInSamples);
-        options[std::string(side) + "nested"] = defaults.nested ? 1.0 : 0.0;
         options[std::string(side) + "jitter"] = defaults.jitter;
     }
     std::string csvPath;
@@ -105,12 +79,8 @@ int main(int argc, char **argv)
     }
     if (!valid)
     {
-        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprintA.bin> <blueprintB.bin>";
-        for (const auto &[name, value] : options)
-        {
-            std::cerr << " [" << name << ' ' << value << ']';
-        }
-        std::cerr << " [--csv pairs.csv]\n  plays --pairs deals twice each (seats swapped) between bots A and B, over --sessions threads;\n"
+        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprintA.bin> <blueprintB.bin>" << optionsUsage(options)
+                  << " [--csv pairs.csv]\n  plays --pairs deals twice each (seats swapped) between bots A and B, over --sessions threads;\n"
                      "  the csv gets, per pair, the big blind's and small blind's cards, the board, and for A in the small blind\n"
                      "  and then in the big blind: the action, A's chips and A's chips with all-ins before the river at their equity\n";
         return 1;
@@ -126,18 +96,15 @@ int main(int argc, char **argv)
         }
         csv << "pair,bb_cards,sb_cards,board,a_sb_action,a_sb_chips,a_sb_adjusted,a_bb_action,a_bb_chips,a_bb_adjusted\n";
     }
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    if (abstraction == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << '\n';
         return 1;
     }
-    BlueprintConfig::abstraction = abstraction.get();
     const auto preflopA = loadPreflop(*abstraction, argv[2]);
     const auto preflopB = std::string(argv[2]) == argv[3] ? nullptr : loadPreflop(*abstraction, argv[3]);
     if (preflopA == nullptr || (preflopB == nullptr && std::string(argv[2]) != argv[3]))
     {
-        std::cerr << "cannot load a blueprint\n";
         return 1;
     }
     if (Gpu::instance() == nullptr)
@@ -148,8 +115,7 @@ int main(int argc, char **argv)
     const auto resolves = [&](const std::string &side)
     {
         const auto get = [&](const char *name) { return static_cast<std::size_t>(options[side + name]); };
-        return SlumbotResolves{get("flop-iterations"), get("turn-iterations"), get("river-iterations"), get("flop-samples"), get("all-in-samples"),
-                               get("nested") != 0, options[side + "jitter"]};
+        return SlumbotResolves{get("flop-iterations"), get("turn-iterations"), get("river-iterations"), get("flop-samples"), options[side + "jitter"]};
     };
     const SlumbotResolves resolvesA = resolves("--a-"), resolvesB = resolves("--b-");
     const auto pairs = static_cast<std::uint64_t>(options["--pairs"]);
@@ -187,10 +153,10 @@ int main(int argc, char **argv)
             const std::lock_guard lock(mutex);
             if (csv.is_open())
             {
-                csv << pair << ',' << cards(hands[0]) << ',' << cards(hands[1]) << ',';
+                csv << pair << ',' << cardsText(hands[0]) << ',' << cardsText(hands[1]) << ',';
                 for (const std::uint64_t card : order)
                 {
-                    csv << cards(card);
+                    csv << cardsText(card);
                 }
                 csv << ',' << first->action << ',' << first->chips << ',' << first->adjusted << ',' << second->action << ',' << -second->chips << ','
                     << -second->adjusted << std::endl;

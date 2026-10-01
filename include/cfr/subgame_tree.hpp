@@ -78,34 +78,27 @@ inline const std::vector<std::int16_t> &flopAllInBalance(std::uint64_t flop)
     cached = flop;
     balance.assign(holeCombos * holeCombos, 0);
     std::array<std::int16_t, holeCombos> live{}; // all ones for the hands a board leaves alive
-    const std::uint64_t deck = ((1ull << 52) - 1) & ~flop;
-    for (std::uint64_t turns = deck; turns != 0; turns &= turns - 1)
-    {
-        const std::uint64_t turn = turns & (~turns + 1);
-        for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
+    forEachPair(((1ull << 52) - 1) & ~flop, [&](std::uint64_t runout)
+                {
+        const std::uint16_t *__restrict ranks = boardRanks(flop | runout).data();
+        for (std::size_t h = 0; h < holeCombos; ++h)
         {
-            const std::uint64_t board = flop | turn | (rivers & (~rivers + 1));
-            const std::uint16_t *__restrict ranks = boardRanks(board).data();
-            for (std::size_t h = 0; h < holeCombos; ++h)
-            {
-                live[h] = (holes[h] & board) == 0 ? -1 : 0;
-            }
-            const std::int16_t *__restrict alive = live.data();
-            for (std::size_t i = 0; i < holeCombos; ++i)
-            {
-                if (alive[i] == 0)
-                {
-                    continue;
-                }
-                const std::uint16_t mine = ranks[i];
-                std::int16_t *__restrict row = balance.data() + i * holeCombos;
-                for (std::size_t j = i + 1; j < holeCombos; ++j) // the lower half is filled in at the end
-                {
-                    row[j] = static_cast<std::int16_t>(row[j] + (alive[j] & ((ranks[j] < mine) - (ranks[j] > mine))));
-                }
-            }
+            live[h] = (holes[h] & (flop | runout)) == 0 ? -1 : 0;
         }
-    }
+        const std::int16_t *__restrict alive = live.data();
+        for (std::size_t i = 0; i < holeCombos; ++i)
+        {
+            if (alive[i] == 0)
+            {
+                continue;
+            }
+            const std::uint16_t mine = ranks[i];
+            std::int16_t *__restrict row = balance.data() + i * holeCombos;
+            for (std::size_t j = i + 1; j < holeCombos; ++j) // the lower half is filled in at the end
+            {
+                row[j] = static_cast<std::int16_t>(row[j] + (alive[j] & ((ranks[j] < mine) - (ranks[j] > mine))));
+            }
+        } });
     for (std::size_t i = 0; i < holeCombos; ++i)
     {
         for (std::size_t j = i + 1; j < holeCombos; ++j)
@@ -383,7 +376,7 @@ private:
             std::vector<std::uint64_t> cards;
             for (std::uint64_t c = ((1ull << 52) - 1) & ~s.board; c != 0; c &= c - 1)
             {
-                cards.push_back(c & (~c + 1));
+                cards.push_back(lowestBit(c));
             }
             // A hand pair sees `remaining - 4` of the remaining cards, equally likely. Dealing only a
             // sample, each dealt card stands for remaining / sampled of them: exact for a full deal and

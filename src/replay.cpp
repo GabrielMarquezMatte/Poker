@@ -3,9 +3,8 @@
 // The resolves are rebuilt from the hand's actions, so they match the ones played. Preflop, a Slumbot
 // raise between two blueprint sizes is translated by a draw from the hand's seed: without the seed
 // column (older files) the replay may translate it the other way and see slightly different ranges.
-#include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/gpu_subgame_solver.hpp"
-#include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/tools.hpp"
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -14,17 +13,6 @@
 #include <vector>
 
 using Bot = SlumbotBot<Blueprint200Config, GpuSubgameSolver>;
-
-// "AsKd7c" as one mask per card, in order.
-static std::vector<std::uint64_t> cards(const std::string &text)
-{
-    std::vector<std::uint64_t> out;
-    for (std::size_t i = 0; i + 1 < text.size(); i += 2)
-    {
-        out.push_back(Deck::parseHand(text.substr(i, 2)).getMask());
-    }
-    return out;
-}
 
 static std::string text(const SlumbotAction &action) { return action.type == 'b' ? "b" + std::to_string(action.size) : std::string(1, action.type); }
 
@@ -42,13 +30,12 @@ static bool replay(Bot &bot, const std::string &line, std::size_t number)
         std::cerr << "line " << number << ": not a hand\n";
         return false;
     }
-    const std::vector<std::uint64_t> hole = cards(fields[3]), board = cards(fields[4]);
+    const std::vector<std::uint64_t> hole = parseCards(fields[3]), board = parseCards(fields[4]);
     const bool seeded = fields.size() >= 8 && !fields[7].empty();
     std::cout << std::format("line {}: {} holding {} against {}, board {}, {} chips{}\n  {}\n", number, fields[0] == "0" ? "big blind" : "small blind",
                              fields[3], fields[5].empty() ? "??" : fields[5], fields[4].empty() ? "-" : fields[4], fields[2],
                              seeded ? "" : " (no seed: preflop translations may differ)", fields[1]);
     bot.newHand(fields[0] == "0" ? 1 : 0, hole[0] | hole[1], seeded ? std::optional(std::stoull(fields[7])) : std::nullopt);
-    static constexpr std::array<std::size_t, 4> shown{0, 3, 4, 5};
     std::string seen; // the actions before the one at hand
     for (std::size_t k = 0; k < actions->size(); ++k)
     {
@@ -56,7 +43,7 @@ static bool replay(Bot &bot, const std::string &line, std::size_t number)
         const std::string taken = text(action);
         seen += std::string(k > 0 ? action.street - (*actions)[k - 1].street : 0, '/');
         const std::vector<SlumbotAction> prefix(actions->begin(), actions->begin() + static_cast<std::ptrdiff_t>(k));
-        const std::size_t dealt = std::min(shown[action.street], board.size());
+        const std::size_t dealt = std::min<std::size_t>(cardsOnBoard[action.street], board.size());
         const auto decision = bot.peek(prefix, {board.begin(), board.begin() + static_cast<std::ptrdiff_t>(dealt)});
         const std::string before = seen.empty() ? "-" : seen;
         seen += taken;
@@ -91,22 +78,11 @@ int main(int argc, char **argv)
                      "  resolves, printing our options at each decision and starring the one played\n";
         return 1;
     }
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    const auto preflop = abstraction != nullptr ? loadPreflop(*abstraction, argv[2]) : nullptr;
+    if (preflop == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << '\n';
         return 1;
-    }
-    BlueprintConfig::abstraction = abstraction.get();
-    std::unique_ptr<PreflopStrategy<Blueprint200>> preflop;
-    {
-        const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(blueprintCapacity<Blueprint200>(*abstraction));
-        if (!blueprint->load(argv[2]))
-        {
-            std::cerr << "cannot load blueprint " << argv[2] << '\n';
-            return 1;
-        }
-        preflop = std::make_unique<PreflopStrategy<Blueprint200>>(*blueprint);
     }
     if (Gpu::instance() == nullptr)
     {

@@ -354,16 +354,11 @@ TEST(SubgameSolver, FlopAllInBalanceMatchesBruteForce)
         const std::size_t i = rng() % holeCombos, j = rng() % holeCombos;
         const std::uint64_t dead = flop | holes[i] | holes[j];
         int expected = 0;
-        for (std::uint64_t turns = ((1ull << 52) - 1) & ~dead; turns != 0 && std::popcount(dead) == 7; turns &= turns - 1)
-        {
-            for (std::uint64_t rivers = turns & (turns - 1); rivers != 0; rivers &= rivers - 1)
-            {
-                const std::uint64_t board = flop | (turns & (~turns + 1)) | (rivers & (~rivers + 1));
-                const auto mine = Hand::classify(Deck::from_mask(holes[i] | board));
-                const auto theirs = Hand::classify(Deck::from_mask(holes[j] | board));
-                expected += mine > theirs ? 1 : (mine < theirs ? -1 : 0);
-            }
-        }
+        forEachPair(std::popcount(dead) == 7 ? ((1ull << 52) - 1) & ~dead : 0, [&](std::uint64_t runout)
+                    {
+            const auto mine = Hand::classify(Deck::from_mask(holes[i] | flop | runout));
+            const auto theirs = Hand::classify(Deck::from_mask(holes[j] | flop | runout));
+            expected += mine > theirs ? 1 : (mine < theirs ? -1 : 0); });
         decided += expected != 0;
         ASSERT_EQ(balance[i * holeCombos + j], expected) << i << " against " << j;
         ASSERT_EQ(balance[j * holeCombos + i], -expected);

@@ -1,7 +1,7 @@
 // Estimates a blueprint's exploitability with local best response (a lower bound), in mbb/hand.
-#include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/gpu_subgame_solver.hpp"
 #include "../include/cfr/lbr.hpp"
+#include "../include/cfr/tools.hpp"
 #include <chrono>
 #include <iostream>
 #include <map>
@@ -20,23 +20,10 @@ int main(int argc, char **argv)
                                           {"--flop-iterations", 0.0},
                                           {"--flop-samples", 8.0},
                                           {"--gpu", 0.0}};
-    bool valid = argc >= 4 && argc % 2 == 0;
-    for (int i = 4; valid && i + 1 < argc; i += 2)
+    if (!parseOptions(argc, argv, 4, options))
     {
-        valid = options.contains(argv[i]);
-        if (valid)
-        {
-            options[argv[i]] = std::stod(argv[i + 1]);
-        }
-    }
-    if (!valid)
-    {
-        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin> <preflop_equity.bin>";
-        for (const auto &[name, value] : options)
-        {
-            std::cerr << " [" << name << ' ' << value << ']';
-        }
-        std::cerr << "\n  --hands is per LBR seat; --streets is a bitmask of where LBR deviates"
+        std::cerr << "usage: " << argv[0] << " <abstraction.bin> <blueprint.bin> <preflop_equity.bin>" << optionsUsage(options)
+                  << "\n  --hands is per LBR seat; --streets is a bitmask of where LBR deviates"
                      " (1 preflop, 2 flop, 4 turn, 8 river; 0 = self-play)\n"
                      "  --river-iterations > 0 evaluates the blueprint resolving each river with that many DCFR iterations,\n"
                      "  --turn-iterations > 0 each turn (to showdown, with a coarser river),\n"
@@ -44,14 +31,11 @@ int main(int argc, char **argv)
                      "  --gpu 1 resolves flops and turns on the first OpenCL GPU\n";
         return 1;
     }
-
-    const auto abstraction = std::make_unique<CardAbstraction>();
-    if (!abstraction->load(argv[1]))
+    const auto abstraction = loadAbstraction(argv[1]);
+    if (abstraction == nullptr)
     {
-        std::cerr << "cannot load abstraction " << argv[1] << '\n';
         return 1;
     }
-    BlueprintConfig::abstraction = abstraction.get();
     const auto blueprint = std::make_unique<Mccfr<Blueprint>>(blueprintCapacity(*abstraction));
     if (!blueprint->load(argv[2]))
     {
