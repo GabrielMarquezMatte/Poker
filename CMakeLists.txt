@@ -72,5 +72,8 @@ target_link_libraries(${PROJECT_NAME}_Api PRIVATE Drogon::Drogon bshoshany-threa
 add_executable(${PROJECT_NAME}_Slumbot src/slumbot.cpp)
 target_link_libraries(${PROJECT_NAME}_Slumbot PRIVATE Drogon::Drogon glaze::glaze bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)
 
+add_executable(${PROJECT_NAME}_PreflopDrift src/preflop_drift.cpp)
+target_link_libraries(${PROJECT_NAME}_PreflopDrift PRIVATE bshoshany-thread-pool::bshoshany-thread-pool)
+
 add_executable(${PROJECT_NAME}_Duel src/duel.cpp)
 target_link_libraries(${PROJECT_NAME}_Duel PRIVATE bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)
