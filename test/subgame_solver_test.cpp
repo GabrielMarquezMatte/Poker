@@ -294,3 +294,50 @@ TEST(SubgameSolver, RootExtraActionIsSolved)
     }
     EXPECT_NEAR(total, 1.0, 1e-6);
 }
+
+// Every river's hands are the turn's that its card leaves alive, weakest first with ties in the turn's
+// order, and a group per strength: what the showdown sums rely on.
+TEST(SubgameSolver, RiverSpacesAreSortedWeakestFirst)
+{
+    Hands reach{};
+    CfrRng rng{9};
+    for (auto &r : reach)
+    {
+        r = (rng() % 4 == 0) ? 0.0 : 1.0; // a turn space with gaps
+    }
+    const SubgameTree<CheckDown> tree(turnRoot<Hunl<CheckDown>>("2c 7d 9h Js", 20), {reach, reach});
+    ASSERT_EQ(tree.spaces.size(), 49u); // the turn and its 48 rivers
+    const auto &turn = tree.spaces[0];
+    for (const auto &node : tree.nodes)
+    {
+        if (std::popcount(node.state.board) != 5)
+        {
+            continue;
+        }
+        std::vector<std::pair<ClassificationResult, std::uint16_t>> expected;
+        for (std::size_t j = 0; j < turn.size(); ++j)
+        {
+            const std::uint64_t hole = (1ull << turn.low[j]) | (1ull << turn.high[j]);
+            if ((hole & node.state.board) == 0)
+            {
+                expected.emplace_back(Hand::classify(Deck::from_mask(hole | node.state.board)), static_cast<std::uint16_t>(j));
+            }
+        }
+        std::sort(expected.begin(), expected.end());
+        const auto &space = tree.spaces[node.space];
+        ASSERT_EQ(space.size(), expected.size());
+        std::vector<std::size_t> groups;
+        for (std::size_t k = 0; k < expected.size(); ++k)
+        {
+            if (k == 0 || expected[k].first != expected[k - 1].first)
+            {
+                groups.push_back(k);
+            }
+            ASSERT_EQ(space.parent[k], expected[k].second);
+            ASSERT_EQ(space.low[k], turn.low[expected[k].second]);
+            ASSERT_EQ(space.high[k], turn.high[expected[k].second]);
+        }
+        groups.push_back(expected.size());
+        ASSERT_EQ(space.groups, groups);
+    }
+}

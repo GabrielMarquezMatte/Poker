@@ -18,6 +18,42 @@ struct SubgameOptions
     std::optional<std::uint32_t> rootExtraAction; // chips the root's actor puts in, on top of the legal actions
 };
 
+// The strength rank of every hole pair on a five-card board: equal strengths share a rank, weaker hands
+// have lower ones (pairs holding a board card are left at 0). Trees sort a river's hands by it. The
+// runouts of different all-ins and the re-solves of a street ask for the same boards again and again,
+// so each thread keeps the last ones it ranked.
+inline const std::array<std::uint16_t, holeCombos> &boardRanks(std::uint64_t board)
+{
+    thread_local std::unordered_map<std::uint64_t, std::array<std::uint16_t, holeCombos>> cache;
+    if (const auto it = cache.find(board); it != cache.end())
+    {
+        return it->second;
+    }
+    if (cache.size() >= 2048) // a flop has 1176 runouts; ~5 MB
+    {
+        cache.clear();
+    }
+    std::vector<std::pair<ClassificationResult, std::uint16_t>> ranked;
+    ranked.reserve(holeCombos);
+    for (std::size_t h = 0; h < holeCombos; ++h)
+    {
+        if ((holes[h] & board) == 0)
+        {
+            ranked.emplace_back(Hand::classify(Deck::from_mask(holes[h] | board)), static_cast<std::uint16_t>(h));
+        }
+    }
+    std::sort(ranked.begin(), ranked.end());
+    auto &ranks = cache[board];
+    ranks.fill(0);
+    std::uint16_t rank = 0;
+    for (std::size_t k = 0; k < ranked.size(); ++k)
+    {
+        rank += k > 0 && ranked[k].first != ranked[k - 1].first ? 1 : 0;
+        ranks[ranked[k].second] = rank;
+    }
+    return ranks;
+}
+
 // The public tree of a postflop subgame of Hunl<C>, from a street's first decision to showdown, with the
 // hands each board leaves alive: what a vector-form CFR solver over exact hands iterates on.
 // Later board cards are chance nodes with one child per card. Every board has its own dense vector of
@@ -169,32 +205,56 @@ private:
         {
             return it->second;
         }
+        // The parent's hands the new card leaves alive, in the parent's order; on the river, weakest
+        // first instead (ties in the parent's order): a counting sort by the board's ranks.
         const bool river = std::popcount(board) == 5;
-        std::vector<std::pair<ClassificationResult, std::uint16_t>> ranked;
+        const Space &parent = spaces[parentIndex];
+        const auto hole = [&](std::size_t j) { return (1ull << parent.low[j]) | (1ull << parent.high[j]); };
+        Space space;
+        if (river)
         {
-            const Space &parent = spaces[parentIndex];
+            const auto &ranks = boardRanks(board);
+            std::array<std::uint16_t, holeCombos + 1> first{}; // where each rank's run starts
             for (std::size_t j = 0; j < parent.size(); ++j)
             {
-                const std::uint64_t hole = (1ull << parent.low[j]) | (1ull << parent.high[j]);
-                if ((hole & board) == 0)
+                if ((hole(j) & board) == 0)
                 {
-                    ranked.emplace_back(river ? Hand::classify(Deck::from_mask(hole | board)) : ClassificationResult{}, static_cast<std::uint16_t>(j));
+                    ++first[ranks[holeIndex(hole(j))] + 1];
+                }
+            }
+            for (std::size_t r = 0; r < holeCombos; ++r)
+            {
+                if (first[r + 1] > 0)
+                {
+                    space.groups.push_back(first[r]);
+                }
+                first[r + 1] = static_cast<std::uint16_t>(first[r + 1] + first[r]);
+            }
+            space.parent.resize(first[holeCombos]);
+            for (std::size_t j = 0; j < parent.size(); ++j)
+            {
+                if ((hole(j) & board) == 0)
+                {
+                    space.parent[first[ranks[holeIndex(hole(j))]]++] = static_cast<std::uint16_t>(j);
                 }
             }
         }
-        std::sort(ranked.begin(), ranked.end());
-        Space space;
-        for (std::size_t k = 0; k < ranked.size(); ++k)
+        else
         {
-            if (river && (k == 0 || ranked[k].first != ranked[k - 1].first))
+            for (std::size_t j = 0; j < parent.size(); ++j)
             {
-                space.groups.push_back(k);
+                if ((hole(j) & board) == 0)
+                {
+                    space.parent.push_back(static_cast<std::uint16_t>(j));
+                }
             }
-            space.parent.push_back(ranked[k].second);
-            space.low.push_back(spaces[parentIndex].low[ranked[k].second]);
-            space.high.push_back(spaces[parentIndex].high[ranked[k].second]);
         }
-        space.groups.push_back(ranked.size());
+        for (const std::uint16_t j : space.parent)
+        {
+            space.low.push_back(parent.low[j]);
+            space.high.push_back(parent.high[j]);
+        }
+        space.groups.push_back(space.parent.size());
         spaces.push_back(std::move(space));
         m_spaceOf[{board, parentIndex}] = spaces.size() - 1;
         return spaces.size() - 1;
