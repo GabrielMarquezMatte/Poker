@@ -48,6 +48,14 @@ TEST(Slumbot, PreflopStrategyCopiesTheBlueprint)
     }
 }
 
+// The 200bb blueprint keeps the average strategy for exactly the infosets the bot reads.
+TEST(Slumbot, BlueprintAveragesWhatTheBotReads)
+{
+    static_assert(PartlyAveraged<Blueprint200> && !PartlyAveraged<Blueprint>);
+    const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 10);
+    EXPECT_EQ(Blueprint200::averagedKeys().size(), PreflopStrategy<Blueprint200>(*blueprint).size());
+}
+
 namespace
 {
 // A random legal action, as a stand-in for Slumbot.

@@ -101,9 +101,9 @@ static int train(const CardAbstraction &abstraction, const std::string &blueprin
     std::array<std::uint64_t, 4> nodes{};
     const std::uint64_t bound = blueprintInfosetBound<G>(abstraction, nodes);
     auto solver = std::make_unique<Mccfr<G>>(blueprintCapacity<G>(abstraction));
-    const double gigabytes = static_cast<double>(solver->capacity()) * (8 + 8 * G::maxActions) / 1e9;
     std::cerr << "public nodes " << nodes[0] << '/' << nodes[1] << '/' << nodes[2] << '/' << nodes[3]
-              << ", infoset bound " << bound << ", table " << solver->capacity() << " slots (" << gigabytes << " GB)\n";
+              << ", infoset bound " << bound << ", table " << solver->capacity() << " slots ("
+              << static_cast<double>(solver->bytes()) / 1e9 << " GB)\n";
     if (std::filesystem::exists(blueprintPath))
     {
         if (!solver->load(blueprintPath))

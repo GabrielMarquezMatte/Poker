@@ -155,6 +155,69 @@ TEST(MccfrKuhn, SaveLoadRoundTrips)
     EXPECT_EQ(gameValue(loaded), gameValue(trainedKuhn()));
 }
 
+// Kuhn keeping the average strategy for the opening decision only.
+struct KuhnOpeningAverage : Kuhn
+{
+    static bool averaged(const State &s) { return s.length == 0; }
+    static std::vector<std::uint64_t> averagedKeys() { return {0, 1, 2}; } // infosetKey of each card, no history
+};
+static_assert(PartlyAveraged<KuhnOpeningAverage> && !PartlyAveraged<Kuhn>);
+
+// Averages do not feed back into regrets: the kept ones match a fully averaged run of the same seed,
+// and only they are stored.
+TEST(MccfrKuhn, PartlyAveragedKeepsOnlyThoseAverages)
+{
+    Mccfr<KuhnOpeningAverage> solver(64);
+    CfrRng rng{42};
+    trainLinear(solver, 100, 3'000, rng);
+    for (std::uint64_t card = 0; card < 3; ++card)
+    {
+        EXPECT_EQ(solver.averageStrategy(card, 2), trainedKuhn().averageStrategy(card, 2));
+    }
+    const std::string path = (std::filesystem::temp_directory_path() / "mccfr_kuhn_partly_test.bin").string();
+    ASSERT_TRUE(solver.save(path));
+    EXPECT_EQ(std::filesystem::file_size(path), 5 * 8 + (12 + 3) * (8 + 2 * 4)); // header, 12 regrets, 3 averages
+    Mccfr<KuhnOpeningAverage> loaded(64);
+    ASSERT_TRUE(loaded.load(path));
+    std::filesystem::remove(path);
+    for (std::uint64_t key = 0; key < 64; ++key)
+    {
+        EXPECT_EQ(loaded.averageStrategy(key, 2), solver.averageStrategy(key, 2));
+    }
+}
+
+// Files from before the averages had their own table hold one for every infoset.
+TEST(MccfrKuhn, LoadsTheOldFormatDroppingAveragesNotKept)
+{
+    const std::string path = (std::filesystem::temp_directory_path() / "mccfr_kuhn_old_test.bin").string();
+    const std::uint64_t opening = 1, later = 1 | (1 << 2); // Q to open, Q after one action
+    {
+        std::ofstream out(path, std::ios::binary);
+        const std::uint64_t header[4] = {2, 2, 7, 3}; // maxActions, infosets, iterations, discounts
+        out.write(reinterpret_cast<const char *>(header), sizeof(header));
+        for (std::uint64_t key : {opening, later})
+        {
+            const std::uint64_t stored = omp::splitmix64(key); // as Mccfr stores keys (it advances its argument)
+            const float regrets[2] = {1.0f, 3.0f}, average[2] = {1.0f, 1.0f};
+            out.write(reinterpret_cast<const char *>(&stored), sizeof(stored));
+            out.write(reinterpret_cast<const char *>(regrets), sizeof(regrets));
+            out.write(reinterpret_cast<const char *>(average), sizeof(average));
+        }
+    }
+    Mccfr<Kuhn> all(64);
+    Mccfr<KuhnOpeningAverage> partly(64);
+    ASSERT_TRUE(all.load(path));
+    ASSERT_TRUE(partly.load(path));
+    std::filesystem::remove(path);
+    using Strategy = Mccfr<Kuhn>::Strategy;
+    EXPECT_EQ(all.averageStrategy(opening, 2), (Strategy{0.5, 0.5}));
+    EXPECT_EQ(all.averageStrategy(later, 2), (Strategy{0.5, 0.5}));
+    EXPECT_EQ(partly.averageStrategy(opening, 2), (Strategy{0.5, 0.5}));
+    EXPECT_EQ(partly.averageStrategy(later, 2), (Strategy{0.25, 0.75})); // no average kept: the current strategy
+    EXPECT_EQ(partly.iterations(), 7u);
+    EXPECT_EQ(partly.discounts(), 3u);
+}
+
 TEST(MccfrKuhn, MatchesKnownEquilibriumFamily)
 {
     constexpr double tol = 0.05;

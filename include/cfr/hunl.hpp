@@ -5,6 +5,7 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <vector>
 
 // 100bb heads-up with a 0.5/1/2 pot raise abstraction on every street. Chips: small blind 1, big blind 2.
 // Postflop buckets here are the made-hand category (9 buckets): enough for tests and smoke runs.
@@ -143,6 +144,21 @@ struct Hunl
     }
     static std::uint64_t infosetKeyWithBucket(const State &s, std::uint16_t bucket) { return mix(s.history, bucket); }
 
+    // With C::preflopAverageOnly the solver keeps the average strategy preflop only (Mccfr's PartlyAveraged):
+    // for blueprints whose later streets are re-solved at play time.
+    static bool averaged(const State &s)
+        requires requires { C::preflopAverageOnly; }
+    {
+        return s.street == 0;
+    }
+    static std::vector<std::uint64_t> averagedKeys()
+        requires requires { C::preflopAverageOnly; }
+    {
+        std::vector<std::uint64_t> keys;
+        preflopKeys(initial(), keys);
+        return keys;
+    }
+
     static Actions legalActions(const State &s)
     {
         Actions out;
@@ -224,6 +240,22 @@ struct Hunl
 
 private:
     static constexpr std::array<int, 5> boardSize{0, 3, 4, 5, 5};
+
+    static void preflopKeys(const State &s, std::vector<std::uint64_t> &keys)
+    {
+        if (isTerminal(s) || s.street != 0)
+        {
+            return;
+        }
+        for (std::uint16_t bucket = 0; bucket < 169; ++bucket)
+        {
+            keys.push_back(infosetKeyWithBucket(s, bucket));
+        }
+        for (std::size_t a = 0; a < numActions(s); ++a)
+        {
+            preflopKeys(apply(s, a), keys);
+        }
+    }
 
     static std::uint64_t mix(std::uint64_t h, std::uint64_t v)
     {

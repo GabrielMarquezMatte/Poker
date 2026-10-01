@@ -14,10 +14,12 @@ struct BlueprintConfig : Hunl100bbConfig
 };
 using Blueprint = Hunl<BlueprintConfig>;
 
-// The same abstraction 200bb deep, as Slumbot plays.
+// The same abstraction 200bb deep, as Slumbot plays. The bot re-solves every postflop street, so only
+// the preflop average strategy is kept: 4.3 GB of tables instead of 7.5.
 struct Blueprint200Config : BlueprintConfig
 {
     static constexpr std::uint32_t stack = 400;
+    static constexpr bool preflopAverageOnly = true;
 };
 using Blueprint200 = Hunl<Blueprint200Config>;
 
