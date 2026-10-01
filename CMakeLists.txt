@@ -80,3 +80,6 @@ target_link_libraries(${PROJECT_NAME}_GpuBench PRIVATE bshoshany-thread-pool::bs
 
 add_executable(${PROJECT_NAME}_Duel src/duel.cpp)
 target_link_libraries(${PROJECT_NAME}_Duel PRIVATE bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)
+
+add_executable(${PROJECT_NAME}_Replay src/replay.cpp)
+target_link_libraries(${PROJECT_NAME}_Replay PRIVATE bshoshany-thread-pool::bshoshany-thread-pool PokerGpu)

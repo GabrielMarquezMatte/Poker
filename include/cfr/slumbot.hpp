@@ -168,6 +168,19 @@ public:
     using Range = std::array<double, holeCombos>;
     static_assert(C::stack * slumbotChipsPerChip == 20000 && C::bigBlind * slumbotChipsPerChip == 100);
 
+    // What we could do at a decision: each option's increment and the probability our strategy gave it
+    // (the blueprint's preflop, the street's resolve later), and the one taken.
+    struct Option
+    {
+        std::string incr;
+        double probability = 0.0;
+    };
+    struct Decision
+    {
+        std::vector<Option> options;
+        std::size_t chosen = 0;
+    };
+
     SlumbotBot(const PreflopStrategy<G> &blueprint, SlumbotResolves resolves, std::uint64_t seed) : m_blueprint(blueprint), m_resolves(resolves), m_rng(seed) {}
 
     // `seat`: 0 small blind, 1 big blind. `hole`: our cards. `seed` fixes the hand's random draws: two
@@ -193,6 +206,7 @@ public:
         m_ourIndex.reset();
         m_solvers = {};
         m_nudges = 0;
+        m_decision = {};
         for (std::size_t h = 0; h < holeCombos; ++h)
         {
             m_range[h] = (holes[h] & hole) == 0 ? 1.0 : 0.0;
@@ -204,23 +218,33 @@ public:
     // increment to send if we are to act, or nothing.
     std::optional<std::string> update(const std::vector<SlumbotAction> &actions, const std::vector<std::uint64_t> &board)
     {
-        for (; m_seen < actions.size(); ++m_seen)
-        {
-            if (R::isTerminal(m_real) || m_real.street >= 4)
-            {
-                return std::nullopt;
-            }
-            setBoard(board);
-            observe(actions[m_seen]);
-        }
-        if (R::isTerminal(m_real) || m_real.street >= 4 || m_real.toAct != m_seat)
+        if (!advance(actions, board))
         {
             return std::nullopt;
         }
-        setBoard(board);
         return decide();
     }
 
+    // To go over a hand already played: like update, but returns our options without choosing; choose()
+    // then says which one the hand took, before the next actions are replayed.
+    std::optional<Decision> peek(const std::vector<SlumbotAction> &actions, const std::vector<std::uint64_t> &board)
+    {
+        if (!advance(actions, board))
+        {
+            return std::nullopt;
+        }
+        m_decision = options();
+        return m_decision;
+    }
+    void choose(std::size_t option)
+    {
+        m_decision.chosen = option;
+        (m_real.street == 0 ? m_ourAbstract : m_ourIndex) = m_abstractLost && m_real.street == 0 ? std::nullopt : std::optional(option);
+    }
+
+    // The last decision update made this hand (no options before the first).
+    inline const Decision &decision() const noexcept { return m_decision; }
+    inline std::uint64_t handSeed() const noexcept { return m_handSeed; }
     inline const State &state() const noexcept { return m_real; }
     inline const Range &range() const noexcept { return m_range; }
     // Resolves this hand that kept our hand in the tree only thanks to the nudge in resolve().
@@ -264,6 +288,27 @@ private:
     Range m_range{}, m_beliefs{};
     Solvers m_solvers;
     std::size_t m_nudges = 0;
+    Decision m_decision;
+
+    // Replays the actions not seen yet; true if we are to act.
+    bool advance(const std::vector<SlumbotAction> &actions, const std::vector<std::uint64_t> &board)
+    {
+        for (; m_seen < actions.size(); ++m_seen)
+        {
+            if (R::isTerminal(m_real) || m_real.street >= 4)
+            {
+                return false;
+            }
+            setBoard(board);
+            observe(actions[m_seen]);
+        }
+        if (R::isTerminal(m_real) || m_real.street >= 4 || m_real.toAct != m_seat)
+        {
+            return false;
+        }
+        setBoard(board);
+        return true;
+    }
 
     // What a random draw decides: our action, the size of our jittered bet, or which blueprint action a
     // preflop bet stands for.
@@ -594,65 +639,77 @@ private:
         return "b" + std::to_string(slumbotLegalBet(size, m_slumbotBetTo, m_slumbotIncrement, m_slumbotTotal));
     }
 
-    std::string decide()
+    // Our options at the state we are to act in, resolving the street first if its solution is not at hand.
+    Decision options()
     {
         const std::size_t hand = holeIndex(m_hole);
+        Decision decision;
         if (m_real.street == 0)
         {
             if (m_abstractLost)
             {
-                return increment(m_real.invested[1 - m_seat]); // ponytail: call once the blueprint can't follow
+                decision.options.push_back({increment(m_real.invested[1 - m_seat]), 1.0}); // ponytail: call once the blueprint can't follow
+                return decision;
             }
             const auto sigma = blueprintStrategy(m_abstract, hand);
             const auto legal = G::legalActions(m_abstract);
-            const std::size_t a = sample(sigma, legal.size);
-            m_ourAbstract = a;
-            const std::uint32_t abstractTo = legal.to[a];
             const std::uint32_t abstractFacing = std::max(m_abstract.invested[0], m_abstract.invested[1]);
-            if (abstractTo == G::fold || abstractTo <= abstractFacing)
-            {
-                return increment(abstractTo == G::fold ? G::fold : m_real.invested[1 - m_seat]);
-            }
-            // The same pot fraction in the real game.
             const std::uint32_t facing = std::max(m_real.invested[0], m_real.invested[1]);
-            std::uint32_t to = C::stack;
-            if (abstractTo < C::stack)
+            for (std::size_t a = 0; a < legal.size; ++a)
             {
-                const double fraction = (static_cast<double>(abstractTo) - abstractFacing) / (2.0 * abstractFacing);
-                to = static_cast<std::uint32_t>(std::lround(facing + fraction * 2.0 * facing));
+                const std::uint32_t abstractTo = legal.to[a];
+                std::uint32_t to = abstractTo == G::fold ? G::fold : m_real.invested[1 - m_seat];
+                if (abstractTo != G::fold && abstractTo > abstractFacing)
+                {
+                    // The same pot fraction in the real game.
+                    to = C::stack;
+                    if (abstractTo < C::stack)
+                    {
+                        const double fraction = (static_cast<double>(abstractTo) - abstractFacing) / (2.0 * abstractFacing);
+                        to = static_cast<std::uint32_t>(std::lround(facing + fraction * 2.0 * facing));
+                    }
+                    to = std::clamp(to, std::min(facing + m_real.lastRaise, C::stack), C::stack);
+                }
+                decision.options.push_back({increment(to), sigma[a]});
             }
-            return increment(std::clamp(to, std::min(facing + m_real.lastRaise, C::stack), C::stack));
+            return decision;
         }
         if (!m_solvers.onTree)
         {
             resolve();
         }
         const auto legal = R::legalActions(m_solvers.node);
-        const std::size_t a = sample(resolvedStrategy(hand), legal.size);
-        std::uint32_t to = legal.to[a];
-        const std::uint32_t facing = std::max(m_real.invested[0], m_real.invested[1]);
-        if (m_resolves.jitter > 0.0 && to != R::fold && to > facing && to < C::stack)
+        const auto sigma = resolvedStrategy(hand);
+        for (std::size_t a = 0; a < legal.size; ++a)
         {
-            const double scale = 1.0 + m_resolves.jitter * (2.0 * uniform(Draw::size) - 1.0);
-            const auto jittered = static_cast<std::uint32_t>(std::lround(facing + (to - facing) * scale));
-            to = std::clamp(jittered, std::min(facing + m_real.lastRaise, C::stack), C::stack - 1);
+            decision.options.push_back({increment(legal.to[a]), sigma[a]});
         }
-        m_ourIndex = a;
-        return increment(to);
+        return decision;
     }
 
-    template <typename S>
-    std::size_t sample(const S &sigma, std::size_t n) const
+    std::string decide()
     {
+        m_decision = options();
         double r = uniform(Draw::action);
-        for (std::size_t a = 0; a + 1 < n; ++a)
+        std::size_t a = 0;
+        while (a + 1 < m_decision.options.size() && (r -= m_decision.options[a].probability) >= 0.0)
         {
-            if ((r -= sigma[a]) < 0.0)
-            {
-                return a;
-            }
+            ++a;
         }
-        return n - 1;
+        choose(a);
+        if (m_real.street == 0 || m_resolves.jitter <= 0.0)
+        {
+            return m_decision.options[a].incr;
+        }
+        const std::uint32_t to = R::legalActions(m_solvers.node).to[a];
+        const std::uint32_t facing = std::max(m_real.invested[0], m_real.invested[1]);
+        if (to == R::fold || to <= facing || to >= C::stack)
+        {
+            return m_decision.options[a].incr;
+        }
+        const double scale = 1.0 + m_resolves.jitter * (2.0 * uniform(Draw::size) - 1.0);
+        const auto jittered = static_cast<std::uint32_t>(std::lround(facing + (to - facing) * scale));
+        return increment(std::clamp(jittered, std::min(facing + m_real.lastRaise, C::stack), C::stack - 1));
     }
 };
 #endif // __POKER_CFR_SLUMBOT_HPP__

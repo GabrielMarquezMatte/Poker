@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cmath>
 #include <drogon/HttpClient.h>
+#include <format>
 #include <fstream>
 #include <glaze/glaze.hpp>
 #include <iostream>
@@ -131,6 +132,7 @@ static int play(const PreflopStrategy<Blueprint200> &preflop, std::map<std::stri
             }
             auto reply = client.post("new_hand", {token, std::nullopt});
             bool dealt = false;
+            std::string decisions; // ours this hand: options as incr:probability, the one taken starred
             while (reply.has_value() && !reply->error_msg.has_value() && !reply->winnings.has_value())
             {
                 if (!reply->token.empty())
@@ -158,6 +160,12 @@ static int play(const PreflopStrategy<Blueprint200> &preflop, std::map<std::stri
                 {
                     return fail("not our turn after " + reply->action);
                 }
+                decisions += decisions.empty() ? "" : ";";
+                for (std::size_t a = 0; a < bot.decision().options.size(); ++a)
+                {
+                    const auto &option = bot.decision().options[a];
+                    decisions += std::format("{}{}:{:.4f}{}", a > 0 ? "|" : "", option.incr, option.probability, a == bot.decision().chosen ? "*" : "");
+                }
                 reply = client.post("act", {token, incr});
             }
             if (!reply.has_value() || reply->error_msg.has_value())
@@ -174,7 +182,8 @@ static int play(const PreflopStrategy<Blueprint200> &preflop, std::map<std::stri
             squares += mbb * mbb;
             ++played;
             out << reply->client_pos << ',' << reply->action << ',' << *reply->winnings << ',' << join(reply->hole_cards) << ','
-                << join(reply->board) << ',' << join(reply->bot_hole_cards.value_or(std::vector<std::string>{})) << ',' << bot.nudges() << '\n';
+                << join(reply->board) << ',' << join(reply->bot_hole_cards.value_or(std::vector<std::string>{})) << ',' << bot.nudges() << ','
+                << (dealt ? std::to_string(bot.handSeed()) : std::string()) << ',' << decisions << '\n'; // not dealt: Slumbot folded first
             out.flush();
             if (played % 10 == 0)
             {
@@ -218,7 +227,8 @@ int main(int argc, char **argv)
             std::cerr << " [" << name << ' ' << value << ']';
         }
         std::cerr << "\n  plays --hands hands against Slumbot over --sessions concurrent sessions (keep it small: it is a free\n"
-                     "  service), appending client_pos,action,winnings,hole,board,slumbot_hole,nudges per hand to results.csv\n";
+                     "  service), appending client_pos,action,winnings,hole,board,slumbot_hole,nudges,seed,decisions per hand to\n"
+                     "  results.csv (decisions: ours in order, ';' apart, each option as incr:probability, the one taken starred)\n";
         return 1;
     }
     const auto abstraction = std::make_unique<CardAbstraction>();

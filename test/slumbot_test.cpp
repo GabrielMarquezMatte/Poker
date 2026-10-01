@@ -264,3 +264,76 @@ TEST(Slumbot, HandSeedsFixTheDraws)
     }
     EXPECT_GT(changed, 10);
 }
+
+// A decision lists every option with its probability and the one sent; going over the finished hand with
+// peek and choose, given its seed, shows the same decisions again.
+TEST(Slumbot, ReplayShowsTheDecisionsPlayed)
+{
+    using Bot = SlumbotBot<Blueprint200Config>;
+    const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
+    const PreflopStrategy<Blueprint200> preflop(*blueprint);
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2};
+    Bot small(preflop, resolves, 3), big(preflop, resolves, 4), again(preflop, resolves, 5);
+    CfrRng rng{23};
+    std::size_t postflop = 0;
+    for (int hand = 0; hand < 30; ++hand)
+    {
+        Deck deck = Deck::createFullDeck();
+        const std::array<std::uint64_t, 2> hands{deck.popPair(rng).getMask(), deck.popPair(rng).getMask()};
+        std::vector<std::uint64_t> board;
+        for (int i = 0; i < 5; ++i)
+        {
+            board.push_back(deck.popRandomCards(rng, 1).getMask());
+        }
+        const auto dealt = [&](int street) { return std::vector<std::uint64_t>(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[street]); };
+        const std::uint64_t seed = rng();
+        small.newHand(0, hands[1], seed);
+        big.newHand(1, hands[0]);
+        SlumbotReferee referee;
+        std::vector<std::pair<std::size_t, Bot::Decision>> played; // the small blind's, by actions seen
+        while (!referee.done)
+        {
+            const bool smallActs = referee.pos == 1;
+            const auto actions = *parseSlumbotActions(referee.action);
+            const auto incr = (smallActs ? small : big).update(actions, dealt(referee.street));
+            ASSERT_TRUE(incr.has_value());
+            if (smallActs)
+            {
+                const Bot::Decision &decision = small.decision();
+                double total = 0.0;
+                for (const auto &option : decision.options)
+                {
+                    total += option.probability;
+                }
+                ASSERT_NEAR(total, 1.0, 1e-6);
+                ASSERT_EQ(decision.options.at(decision.chosen).incr, *incr);
+                played.emplace_back(actions.size(), decision);
+                postflop += referee.street > 0;
+            }
+            ASSERT_TRUE(referee.apply(*incr));
+        }
+        const auto actions = *parseSlumbotActions(referee.action);
+        again.newHand(0, hands[1], seed);
+        std::size_t next = 0;
+        for (std::size_t k = 0; k < actions.size(); ++k)
+        {
+            const auto decision = again.peek({actions.begin(), actions.begin() + static_cast<std::ptrdiff_t>(k)}, dealt(actions[k].street));
+            if (!decision.has_value())
+            {
+                continue;
+            }
+            ASSERT_LT(next, played.size());
+            ASSERT_EQ(played[next].first, k) << "hand " << hand;
+            ASSERT_EQ(decision->options.size(), played[next].second.options.size());
+            for (std::size_t a = 0; a < decision->options.size(); ++a)
+            {
+                ASSERT_EQ(decision->options[a].incr, played[next].second.options[a].incr);
+                ASSERT_DOUBLE_EQ(decision->options[a].probability, played[next].second.options[a].probability) << "hand " << hand << ", decision " << next;
+            }
+            again.choose(played[next].second.chosen);
+            ++next;
+        }
+        EXPECT_EQ(next, played.size()) << "hand " << hand;
+    }
+    EXPECT_GT(postflop, 5u);
+}
