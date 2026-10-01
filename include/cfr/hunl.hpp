@@ -201,6 +201,7 @@ struct Hunl
     }
 
     static State apply(const State &s, std::size_t action) { return applyTo(s, legalActions(s).to[action], action); }
+    static State apply(const State &s, const Actions &legal, std::size_t action) { return applyTo(s, legal.to[action], action); }
 
     // The actor puts `to` chips in total (fold = sentinel), which need not be one of legalActions: real
     // opponents bet any size. `token` extends the history hash (apply passes the action index).

@@ -5,6 +5,7 @@
 
 using Nl = Hunl<Hunl100bbConfig>;
 static_assert(CfrGame<Nl>);
+static_assert(ListsActions<Nl>); // the solver works out a node's actions once
 
 static std::uint64_t cards(std::string_view s) { return Deck::parseHand(s).getMask(); }
 

@@ -46,6 +46,14 @@ concept PartlyAveraged = requires(const typename G::State &s) {
     { G::averagedKeys() } -> std::same_as<std::vector<std::uint64_t>>;
 };
 
+// A game may hand out its action list, legalActions(s) with a `size`, and apply an action given it, so
+// that a node works the list out once instead of once per child.
+template <typename G>
+concept ListsActions = requires(const typename G::State &s, std::size_t action) {
+    { G::legalActions(s).size } -> std::convertible_to<std::size_t>;
+    { G::apply(s, G::legalActions(s), action) } -> std::same_as<typename G::State>;
+};
+
 // External-sampling MCCFR over fixed-capacity open-addressing tables of float regrets and average
 // strategies. train() may run concurrently from several threads: keys are claimed with CAS and values
 // are updated with relaxed loads/stores, so racing updates can be lost but never tear (as in Pluribus).
@@ -63,10 +71,16 @@ public:
     {
         for (std::uint64_t i = 0; i < iterations; ++i)
         {
+            // One sample of an opening chance node (the deal) serves every player's traversal.
+            typename G::State root = G::initial();
+            if (G::isChance(root))
+            {
+                root = G::sampleChance(root, rng);
+            }
             for (std::size_t p = 0; p < G::numPlayers; ++p)
             {
                 const bool prune = m_pruneThreshold < 0.0f && uniform(rng) < m_pruneProbability;
-                traverse(G::initial(), p, rng, prune);
+                traverse(root, p, rng, prune);
             }
         }
         m_iterations.fetch_add(iterations, std::memory_order_relaxed);
@@ -357,6 +371,43 @@ private:
         return n - 1;
     }
 
+    // A node's actions: the game's list where it hands one out, else their number.
+    static inline auto actionsOf(const typename G::State &s)
+    {
+        if constexpr (ListsActions<G>)
+        {
+            return G::legalActions(s);
+        }
+        else
+        {
+            return G::numActions(s);
+        }
+    }
+
+    static inline std::size_t countOf(const auto &actions) noexcept
+    {
+        if constexpr (ListsActions<G>)
+        {
+            return actions.size;
+        }
+        else
+        {
+            return actions;
+        }
+    }
+
+    static inline typename G::State child(const typename G::State &s, const auto &actions, std::size_t action)
+    {
+        if constexpr (ListsActions<G>)
+        {
+            return G::apply(s, actions, action);
+        }
+        else
+        {
+            return G::apply(s, action);
+        }
+    }
+
     // Of a child of the traverser's node: the opponent acts there, so its average is written too.
     inline void prefetch(const typename G::State &s) const noexcept
     {
@@ -381,7 +432,8 @@ private:
         {
             return traverse(G::sampleChance(s, rng), traverser, rng, prune);
         }
-        const std::size_t n = G::numActions(s);
+        const auto actions = actionsOf(s);
+        const std::size_t n = countOf(actions);
         const std::uint64_t key = storedKey(G::infosetKey(s));
         Slot &slot = m_regrets.findOrInsert(key);
         const Values regrets = load(slot.values);
@@ -396,7 +448,7 @@ private:
                     add(average.values[a], sigma[a]);
                 }
             }
-            return traverse(G::apply(s, sample(sigma, n, rng)), traverser, rng, prune);
+            return traverse(child(s, actions, sample(sigma, n, rng)), traverser, rng, prune);
         }
         std::array<bool, G::maxActions> explored{};
         bool any = false;
@@ -412,7 +464,7 @@ private:
             explored[a] = explored[a] || !any;
             if (explored[a])
             {
-                children[a] = G::apply(s, a);
+                children[a] = child(s, actions, a);
                 prefetch(children[a]);
             }
         }

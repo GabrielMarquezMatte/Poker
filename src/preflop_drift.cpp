@@ -93,7 +93,7 @@ static std::unique_ptr<Preflop> loadPreflop(const CardAbstraction &abstraction, 
     {
         return nullptr;
     }
-    std::cerr << path << ": " << blueprint->iterations() << " iterations\n";
+    std::cerr << path << ": " << blueprint->iterations() << " iterations, " << blueprint->discounts() << " blocks\n";
     return std::make_unique<Preflop>(*blueprint);
 }
 
