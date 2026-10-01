@@ -170,9 +170,13 @@ public:
 
     SlumbotBot(const PreflopStrategy<G> &blueprint, SlumbotResolves resolves, std::uint64_t seed) : m_blueprint(blueprint), m_resolves(resolves), m_rng(seed) {}
 
-    // `seat`: 0 small blind, 1 big blind. `hole`: our cards.
-    void newHand(std::size_t seat, std::uint64_t hole)
+    // `seat`: 0 small blind, 1 big blind. `hole`: our cards. `seed` fixes the hand's random draws: two
+    // bots given the same one choose alike wherever their strategies agree (to compare bots on the same
+    // luck); without it the hand takes the next seed of the bot's own sequence.
+    void newHand(std::size_t seat, std::uint64_t hole, std::optional<std::uint64_t> seed = std::nullopt)
     {
+        const std::uint64_t next = m_rng();
+        m_handSeed = seed.value_or(next);
         m_seat = seat;
         m_hole = hole;
         m_real = R::initial();
@@ -244,6 +248,7 @@ private:
     const PreflopStrategy<G> &m_blueprint;
     SlumbotResolves m_resolves;
     CfrRng m_rng;
+    std::uint64_t m_handSeed = 0;
     std::size_t m_seat = 0;
     std::uint64_t m_hole = 0;
     State m_real{};                       // real chips
@@ -260,7 +265,22 @@ private:
     Solvers m_solvers;
     std::size_t m_nudges = 0;
 
-    double uniform() { return static_cast<double>(m_rng() >> 11) * 0x1.0p-53; }
+    // What a random draw decides: our action, the size of our jittered bet, or which blueprint action a
+    // preflop bet stands for.
+    enum class Draw : std::uint64_t
+    {
+        action,
+        size,
+        translation,
+    };
+
+    // In [0, 1), from the hand's seed, the number of actions seen and what the draw is for, not from how
+    // many were drawn before: bots sharing a seed stay in step even where one draws more often.
+    double uniform(Draw draw) const
+    {
+        std::uint64_t x = m_handSeed + 0x9E3779B97F4A7C15ull * (4 * m_seen + static_cast<std::uint64_t>(draw) + 1);
+        return static_cast<double>(omp::splitmix64(x) >> 11) * 0x1.0p-53;
+    }
 
     void setBoard(const std::vector<std::uint64_t> &board)
     {
@@ -475,7 +495,7 @@ private:
             else
             {
                 condition(weights, options, [&](std::size_t h) { return blueprintStrategy(m_abstract, h); });
-                double r = uniform();
+                double r = uniform(Draw::translation);
                 std::size_t chosen = options.back().first;
                 for (const auto &[a, w] : options)
                 {
@@ -613,7 +633,7 @@ private:
         const std::uint32_t facing = std::max(m_real.invested[0], m_real.invested[1]);
         if (m_resolves.jitter > 0.0 && to != R::fold && to > facing && to < C::stack)
         {
-            const double scale = 1.0 + m_resolves.jitter * (2.0 * uniform() - 1.0);
+            const double scale = 1.0 + m_resolves.jitter * (2.0 * uniform(Draw::size) - 1.0);
             const auto jittered = static_cast<std::uint32_t>(std::lround(facing + (to - facing) * scale));
             to = std::clamp(jittered, std::min(facing + m_real.lastRaise, C::stack), C::stack - 1);
         }
@@ -622,9 +642,9 @@ private:
     }
 
     template <typename S>
-    std::size_t sample(const S &sigma, std::size_t n)
+    std::size_t sample(const S &sigma, std::size_t n) const
     {
-        double r = uniform();
+        double r = uniform(Draw::action);
         for (std::size_t a = 0; a + 1 < n; ++a)
         {
             if ((r -= sigma[a]) < 0.0)

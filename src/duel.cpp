@@ -1,5 +1,6 @@
 // Duplicate match between two configurations of the Slumbot bot, played locally: every deal is played
-// twice with the bots swapping seats, so the luck of the cards mostly cancels, and all-ins before the
+// twice with the bots swapping seats and each seat keeping its random draws, so the two hands differ only
+// where the bots' strategies do (the luck of the cards and of the draws cancels), and all-ins before the
 // river score their equity. Reports bot A's winnings against bot B in mbb/hand; --csv <file> also writes
 // every pair's cards, both hands' actions and A's chips in each.
 #include "../include/cfr/blueprint.hpp"
@@ -49,12 +50,13 @@ struct Played
     std::string action;
 };
 
-// One hand: `sb` and `bb` hold hands[1] and hands[0] (by Slumbot's pos: 1 small blind, 0 big blind).
-// Returns nothing if a bot misbehaved.
-static std::optional<Played> playHand(Bot &sb, Bot &bb, const std::array<std::uint64_t, 2> &hands, const std::vector<std::uint64_t> &order)
+// One hand: `sb` and `bb` hold hands[1] and hands[0] (by Slumbot's pos: 1 small blind, 0 big blind) and
+// draw from seeds[1] and seeds[0]. Returns nothing if a bot misbehaved.
+static std::optional<Played> playHand(Bot &sb, Bot &bb, const std::array<std::uint64_t, 2> &hands, const std::vector<std::uint64_t> &order,
+                                      const std::array<std::uint64_t, 2> &seeds)
 {
-    sb.newHand(0, hands[1]);
-    bb.newHand(1, hands[0]);
+    sb.newHand(0, hands[1], seeds[1]);
+    bb.newHand(1, hands[0], seeds[0]);
     SlumbotReferee referee;
     while (!referee.done)
     {
@@ -172,9 +174,10 @@ int main(int argc, char **argv)
             {
                 order.push_back(deck.popRandomCards(rng, 1).getMask());
             }
+            const std::array<std::uint64_t, 2> seeds{rng(), rng()};
             // A in the small blind with hands[1], then B there with the same cards: A is the big blind with hands[0].
-            const auto first = playHand(a, b, hands, order);
-            const auto second = playHand(b, a, hands, order);
+            const auto first = playHand(a, b, hands, order, seeds);
+            const auto second = playHand(b, a, hands, order, seeds);
             if (!first.has_value() || !second.has_value())
             {
                 failed = true;

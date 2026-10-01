@@ -219,3 +219,48 @@ TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
     EXPECT_GT(decisions[1], 0); // postflop, where jittered bets fall off the tree
     EXPECT_GT(decisions[2], 0); // about one hand in thirty gets past the flop
 }
+
+// Bots of the same configuration given the same seeds for a hand play it alike, whichever bot sits
+// where and whatever each drew before; other seeds play it differently.
+TEST(Slumbot, HandSeedsFixTheDraws)
+{
+    const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
+    const PreflopStrategy<Blueprint200> preflop(*blueprint);
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2, .nested = true, .jitter = 0.3};
+    SlumbotBot<Blueprint200Config> first(preflop, resolves, 3), second(preflop, resolves, 4);
+    const auto play = [](auto &sb, auto &bb, const std::array<std::uint64_t, 2> &hands, const std::vector<std::uint64_t> &board,
+                         const std::array<std::uint64_t, 2> &seeds)
+    {
+        sb.newHand(0, hands[1], seeds[1]);
+        bb.newHand(1, hands[0], seeds[0]);
+        SlumbotReferee referee;
+        while (!referee.done)
+        {
+            auto &bot = referee.pos == 1 ? sb : bb;
+            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[referee.street]);
+            const auto incr = bot.update(*parseSlumbotActions(referee.action), seen);
+            if (!incr.has_value() || !referee.apply(*incr))
+            {
+                return std::string("failed after ") + referee.action;
+            }
+        }
+        return referee.action;
+    };
+    CfrRng rng{17};
+    int changed = 0;
+    for (int hand = 0; hand < 30; ++hand)
+    {
+        Deck deck = Deck::createFullDeck();
+        const std::array<std::uint64_t, 2> hands{deck.popPair(rng).getMask(), deck.popPair(rng).getMask()};
+        std::vector<std::uint64_t> board;
+        for (int i = 0; i < 5; ++i)
+        {
+            board.push_back(deck.popRandomCards(rng, 1).getMask());
+        }
+        const std::array<std::uint64_t, 2> seeds{rng(), rng()};
+        const std::string action = play(first, second, hands, board, seeds);
+        ASSERT_EQ(play(second, first, hands, board, seeds), action) << "hand " << hand;
+        changed += play(first, second, hands, board, {rng(), rng()}) != action;
+    }
+    EXPECT_GT(changed, 10);
+}
