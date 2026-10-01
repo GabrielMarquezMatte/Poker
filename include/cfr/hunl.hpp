@@ -162,6 +162,15 @@ struct Hunl
         }
         const std::uint32_t potAfterCall = 2 * facing;
         std::uint32_t last = facing + s.lastRaise - 1; // below this is not a legal raise; also skips 0 slots
+        // Optionally, a street's last allowed raise is all-in only (C::allInOnlyRaises from that raise on).
+        if constexpr (requires { C::allInOnlyRaises; })
+        {
+            if (s.raises + 1 >= C::allInOnlyRaises[s.street])
+            {
+                out.to[out.size++] = C::stack;
+                return out;
+            }
+        }
         for (const double fraction : C::raiseFractions[s.street])
         {
             const std::uint32_t to = facing + static_cast<std::uint32_t>(fraction * potAfterCall);

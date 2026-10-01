@@ -89,8 +89,8 @@ public:
 
     // See SubgameTree for the arguments.
     GpuSubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
-                     std::size_t chanceSamples = 0)
-        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
+                     std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
+        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples, allInSamples), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
           m_forward(m_gpu.program, "forward"), m_terminals(m_gpu.program, "terminals"), m_backward(m_gpu.program, "backward"),
           m_averages(m_tree.averages, 0.0f)
     {

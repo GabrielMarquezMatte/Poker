@@ -245,3 +245,28 @@ TEST(SubgameSolver, SampledChanceIsUnbiased)
     }
     EXPECT_LT(error, 0.02 * 20.0 * mass); // of the stake against the whole range: 0.8% here, 29% with a naive 1 / (sampled - 4) weight
 }
+
+// Runouts after an all-in take their own sample size; streets dealt before more betting take theirs.
+TEST(SubgameSolver, AllInRunoutsHaveTheirOwnSample)
+{
+    using Tree = SubgameTree<Hunl100bbConfig>;
+    auto root = turnRoot<Nl>("2c 7d 9h Js", 20);
+    root.board = Deck::parseHand("2c 7d 9h").getMask();
+    root.street = 1;
+    Hands uniform{};
+    uniform.fill(1.0);
+    const Tree tree(root, {uniform, uniform}, false, 0.0, 4, 10);
+    std::size_t allIns = 0, streets = 0;
+    for (const auto &node : tree.nodes)
+    {
+        if (node.kind != Tree::Kind::chance)
+        {
+            continue;
+        }
+        const bool allIn = node.state.street == Nl::showdown;
+        EXPECT_EQ(node.children.size(), allIn ? 10u : 4u);
+        (allIn ? allIns : streets) += 1;
+    }
+    EXPECT_GT(allIns, 0u);
+    EXPECT_GT(streets, 0u);
+}

@@ -191,3 +191,24 @@ TEST(Slumbot, PlaysLegallyAgainstRandomActions)
         EXPECT_GT(count, 0); // every street was played
     }
 }
+
+// Resolves allow a fourth raise per postflop street, all-in only; preflop keeps the blueprint's raises.
+TEST(Slumbot, FourthPostflopRaiseIsAllIn)
+{
+    using R = Hunl<PostflopRaises<Blueprint200Config>>;
+    auto s = R::initial();
+    s.dealt = true;
+    s.street = 1;
+    s.invested = {4, 4};
+    s.toAct = 1;
+    for (int raise = 0; raise < 3; ++raise)
+    {
+        const auto legal = R::legalActions(s);
+        ASSERT_GT(legal.size, 3u); // sized raises and all-in
+        s = R::apply(s, legal.size - 2); // the largest sized raise
+    }
+    const auto legal = R::legalActions(s);
+    ASSERT_EQ(legal.size, 3u); // fold, call, all-in
+    EXPECT_EQ(legal.to[2], Blueprint200Config::stack);
+    EXPECT_EQ(R::legalActions(R::initial()).size, Blueprint200::legalActions(Blueprint200::initial()).size);
+}

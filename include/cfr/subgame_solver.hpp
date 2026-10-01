@@ -18,8 +18,8 @@ public:
 
     // See SubgameTree for the arguments.
     SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
-                  std::size_t chanceSamples = 0)
-        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
+                  std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
+        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples, allInSamples), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
     {
         m_scratch.resize(m_tree.depth + 1);
         for (auto &scratch : m_scratch)

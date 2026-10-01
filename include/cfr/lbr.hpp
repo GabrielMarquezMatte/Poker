@@ -26,6 +26,7 @@ struct LbrResolves
 {
     std::size_t flop = 0, turn = 0, river = 0;
     std::size_t flopSamples = 8;
+    std::size_t allInSamples = 16; // per card of a flop all-in's runout
 };
 
 // Local best response (Lisy & Bowling 2017): plays real hands against a strategy's average policy,
@@ -95,7 +96,7 @@ public:
             if (m_resolves.flop > 0 && s.street == 1 && solvers.flop == nullptr)
             {
                 solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(s), resolveRanges(seat, range, beliefs), false,
-                                                            minReach, m_resolves.flopSamples);
+                                                            minReach, m_resolves.flopSamples, m_resolves.allInSamples);
                 solvers.flop->solve(m_resolves.flop);
             }
             if (m_resolves.turn > 0 && s.street == 2 && solvers.turn == nullptr)

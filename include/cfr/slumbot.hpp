@@ -118,8 +118,9 @@ private:
     }
 };
 
-// The game the bot resolves in: the blueprint's, with four raises per postflop street. With the
-// blueprint's three, a fourth raise (often Slumbot's all-in) had no counterpart to update its range with.
+// The game the bot resolves in: the blueprint's, with a fourth raise per postflop street, all-in only.
+// With the blueprint's three, a fourth raise (often Slumbot's all-in) had no counterpart to update its
+// range with; allowing every size there more than doubled flop trees.
 template <typename C>
 struct PostflopRaises : C
 {
@@ -132,13 +133,16 @@ struct PostflopRaises : C
         }
         return raises;
     }();
+    static constexpr std::array<std::uint8_t, 4> allInOnlyRaises{255, 4, 4, 4}; // the 4th raise of a postflop street
 };
 
-// Iterations of each resolve; flops deal `flopSamples` cards per chance node.
+// Iterations of each resolve; flops deal `flopSamples` cards per chance node, and `allInSamples` per
+// card of the runout after an all-in.
 struct SlumbotResolves
 {
     std::size_t flop = 60, turn = 60, river = 100;
     std::size_t flopSamples = 6;
+    std::size_t allInSamples = 16; // per card of a flop all-in's runout: 36 runouts misjudged all-ins by ~8% equity
 };
 
 // Plays Slumbot's game with a blueprint of Hunl<C> (C::stack must be 400): the blueprint's preflop, with
@@ -387,7 +391,8 @@ private:
         m_solvers.onTree = true;
         if (m_real.street == 1)
         {
-            m_solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(root), ranges, false, minReach, m_resolves.flopSamples);
+            m_solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(root), ranges, false, minReach, m_resolves.flopSamples,
+                                                          m_resolves.allInSamples);
             m_solvers.flop->solve(m_resolves.flop);
         }
         else if (m_real.street == 2)

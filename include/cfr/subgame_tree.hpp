@@ -61,10 +61,11 @@ struct SubgameTree
     // reach is at most `minReach` times the largest in both ranges are left out (they play uniformly).
     // Average strategies are kept for root-street nodes only unless `averageLaterStreets`. With
     // `chanceSamples` > 0, each chance node deals only that many cards, drawn at random (seeded by the
-    // board and history, so the tree is reproducible).
+    // board and history, so the tree is reproducible); `allInSamples` does the same for the board that
+    // runs out after an all-in, whose value is all there is to those subtrees (0 deals every card).
     SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, bool averageLaterStreets = true, double minReach = 0.0,
-                std::size_t chanceSamples = 0)
-        : m_averageLaterStreets(averageLaterStreets), m_chanceSamples(chanceSamples)
+                std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
+        : m_averageLaterStreets(averageLaterStreets), m_chanceSamples(chanceSamples), m_allInSamples(allInSamples)
     {
         const bool river = std::popcount(root.board) == 5;
         std::array<double, 2> floor{};
@@ -143,7 +144,7 @@ struct SubgameTree
 
 private:
     bool m_averageLaterStreets;
-    std::size_t m_chanceSamples;
+    std::size_t m_chanceSamples, m_allInSamples;
     std::map<std::pair<std::uint64_t, std::size_t>, std::size_t> m_spaceOf; // by board and parent space
 
     // The space of `board`, one card more than the board of space `parentIndex`.
@@ -212,14 +213,15 @@ private:
             // sample, each dealt card stands for remaining / sampled of them: exact for a full deal and
             // unbiased on average for a sample.
             const auto remaining = static_cast<double>(cards.size());
-            if (m_chanceSamples > 0 && cards.size() > m_chanceSamples)
+            const std::size_t samples = s.street == G::showdown ? m_allInSamples : m_chanceSamples;
+            if (samples > 0 && cards.size() > samples)
             {
                 CfrRng rng{s.board * 0x9E3779B97F4A7C15ull ^ s.history};
-                for (std::size_t i = 0; i < m_chanceSamples; ++i)
+                for (std::size_t i = 0; i < samples; ++i)
                 {
                     std::swap(cards[i], cards[i + rng() % (cards.size() - i)]);
                 }
-                cards.resize(m_chanceSamples);
+                cards.resize(samples);
             }
             nodes[idx].weight = static_cast<float>(remaining / (static_cast<double>(cards.size()) * (remaining - 4.0)));
             for (const std::uint64_t card : cards)
