@@ -17,15 +17,14 @@ public:
     using Strategy = typename Tree::Strategy;
 
     // See SubgameTree for the arguments.
-    SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
-                  std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
-        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples, allInSamples), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
+    SubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, const SubgameOptions &options = {})
+        : m_tree(root, ranges, options), m_regret(m_tree.regrets, 0.0f), m_strategy(m_tree.averages, 0.0f)
     {
         m_scratch.resize(m_tree.depth + 1);
         for (auto &scratch : m_scratch)
         {
-            scratch.sigma.resize(G::maxActions * m_tree.hands);
-            scratch.values.resize(G::maxActions * m_tree.hands);
+            scratch.sigma.resize(Tree::maxChildren * m_tree.hands);
+            scratch.values.resize(Tree::maxChildren * m_tree.hands);
             scratch.reach.resize(m_tree.hands);
         }
     }

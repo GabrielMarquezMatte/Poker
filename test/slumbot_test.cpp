@@ -1,5 +1,6 @@
 #include "../include/cfr/blueprint.hpp"
 #include "../include/cfr/slumbot.hpp"
+#include "../include/cfr/slumbot_referee.hpp"
 #include <gtest/gtest.h>
 #include <numeric>
 
@@ -49,100 +50,61 @@ TEST(Slumbot, PreflopStrategyCopiesTheBlueprint)
 
 namespace
 {
-// Slumbot's rules (its sample_api.py): tracks a hand's action string and rejects illegal increments.
-// pos 1 is the small blind (first preflop), 0 the big blind (first postflop).
-struct Referee
+// A random legal action, as a stand-in for Slumbot.
+std::string randomAction(const SlumbotReferee &referee, CfrRng &rng)
 {
-    std::string action;
-    int street = 0, pos = 1;
-    std::uint32_t streetBetTo = 100, totalBetTo = 100, lastBetSize = 50;
-    bool endsStreet = false, done = false;
-
-    bool apply(const std::string &incr)
+    const std::uint32_t remaining = 20000 - referee.totalBetTo;
+    const std::uint64_t r = rng() % 10;
+    if (referee.lastBetSize > 0 && r == 0)
     {
-        const char c = incr.at(0);
-        bool slash = false;
-        if (c == 'f')
-        {
-            if (lastBetSize == 0)
-            {
-                return false;
-            }
-            done = true;
-        }
-        else if (c == 'k' || c == 'c')
-        {
-            if ((c == 'k') != (lastBetSize == 0))
-            {
-                return false;
-            }
-            if (c == 'c' && totalBetTo == 20000)
-            {
-                done = true; // all-in called: the board runs out
-            }
-            else if (endsStreet)
-            {
-                done = street == 3;
-                slash = !done;
-                street += done ? 0 : 1;
-                pos = 0;
-                streetBetTo = 0;
-                endsStreet = false;
-            }
-            else
-            {
-                pos = 1 - pos;
-                endsStreet = true;
-            }
-            lastBetSize = 0;
-        }
-        else if (c == 'b')
-        {
-            const auto to = static_cast<std::uint32_t>(std::stoul(incr.substr(1)));
-            if (to <= streetBetTo)
-            {
-                return false;
-            }
-            const std::uint32_t size = to - streetBetTo, remaining = 20000 - totalBetTo;
-            const std::uint32_t minimum = std::min(std::max<std::uint32_t>(lastBetSize, 100), remaining);
-            if (size < minimum || size > remaining)
-            {
-                return false;
-            }
-            lastBetSize = size;
-            streetBetTo = to;
-            totalBetTo += size;
-            pos = 1 - pos;
-            endsStreet = true;
-        }
-        else
-        {
-            return false;
-        }
-        action += incr;
-        action += slash ? "/" : "";
-        return true;
+        return "f";
     }
-
-    // A random legal action, as a stand-in for Slumbot.
-    std::string random(CfrRng &rng) const
+    if (remaining == 0 || r < 5)
     {
-        const std::uint32_t remaining = 20000 - totalBetTo;
-        const std::uint64_t r = rng() % 10;
-        if (lastBetSize > 0 && r == 0)
-        {
-            return "f";
-        }
-        if (remaining == 0 || r < 5)
-        {
-            return lastBetSize > 0 ? "c" : "k";
-        }
-        const std::uint32_t minimum = std::min(std::max<std::uint32_t>(lastBetSize, 100), remaining);
-        const std::uint32_t size = minimum + static_cast<std::uint32_t>(rng() % (remaining - minimum + 1)) / (r == 9 ? 1 : 8);
-        return "b" + std::to_string(streetBetTo + size);
+        return referee.lastBetSize > 0 ? "c" : "k";
     }
-};
+    const std::uint32_t minimum = std::min(std::max<std::uint32_t>(referee.lastBetSize, 100), remaining);
+    const std::uint32_t size = minimum + static_cast<std::uint32_t>(rng() % (remaining - minimum + 1)) / (r == 9 ? 1 : 8);
+    return "b" + std::to_string(referee.streetBetTo + size);
+}
 } // namespace
+
+TEST(SlumbotReferee, ScoresFoldsShowdownsAndAllIns)
+{
+    const std::array<std::uint64_t, 2> hands{Deck::parseHand("Kc Kd").getMask(), Deck::parseHand("Ac Ad").getMask()}; // pos 0, pos 1
+    std::vector<std::uint64_t> order;
+    for (const char *c : {"2h", "7s", "9d", "Js", "3c"})
+    {
+        order.push_back(Deck::parseHand(c).getMask());
+    }
+    const std::uint64_t board = order[0] | order[1] | order[2] | order[3] | order[4];
+
+    SlumbotReferee fold; // small blind raises, big blind folds
+    ASSERT_TRUE(fold.apply("b300"));
+    ASSERT_TRUE(fold.apply("f"));
+    EXPECT_EQ(fold.winnings(1, hands, board, order, false), 100.0);
+    EXPECT_EQ(fold.winnings(0, hands, board, order, false), -100.0);
+
+    SlumbotReferee showdown; // limp, check down
+    for (const char *incr : {"c", "k", "k", "k", "k", "k", "b200", "c"})
+    {
+        ASSERT_TRUE(showdown.apply(incr)) << incr;
+    }
+    EXPECT_TRUE(showdown.done);
+    EXPECT_EQ(showdown.action, "ck/kk/kk/b200c");
+    EXPECT_EQ(showdown.winnings(1, hands, board, order, false), 300.0); // aces win 100 + 200
+
+    SlumbotReferee allIn; // all-in preflop, called
+    ASSERT_TRUE(allIn.apply("b20000"));
+    ASSERT_TRUE(allIn.apply("c"));
+    EXPECT_EQ(allIn.allInStreet, 0);
+    EXPECT_EQ(allIn.winnings(1, hands, board, order, false), 20000.0);
+    const double equity = SlumbotReferee::equity(hands[1], hands[0], 0);
+    EXPECT_NEAR(equity, 0.826, 0.003); // aces against kings of the same suits (0.828 +/- 0.005 by sampling)
+    EXPECT_NEAR(allIn.winnings(1, hands, board, order, true), (2.0 * equity - 1.0) * 20000.0, 1e-6);
+    EXPECT_FALSE(SlumbotReferee{}.apply("k")); // the small blind faces the big blind
+}
+
 
 // Against random legal play (with long raise wars), the bot always answers when it is to act, its
 // increments are legal and Slumbot's range never empties.
@@ -165,7 +127,7 @@ TEST(Slumbot, PlaysLegallyAgainstRandomActions)
         }
         const int clientPos = static_cast<int>(rng() % 2);
         bot.newHand(clientPos == 0 ? 1 : 0, hole);
-        Referee referee;
+        SlumbotReferee referee;
         while (!referee.done)
         {
             if (referee.pos == clientPos)
@@ -182,7 +144,7 @@ TEST(Slumbot, PlaysLegallyAgainstRandomActions)
             }
             else
             {
-                ASSERT_TRUE(referee.apply(referee.random(rng)));
+                ASSERT_TRUE(referee.apply(randomAction(referee, rng)));
             }
         }
     }
@@ -211,4 +173,41 @@ TEST(Slumbot, FourthPostflopRaiseIsAllIn)
     ASSERT_EQ(legal.size, 3u); // fold, call, all-in
     EXPECT_EQ(legal.to[2], Blueprint200Config::stack);
     EXPECT_EQ(R::legalActions(R::initial()).size, Blueprint200::legalActions(Blueprint200::initial()).size);
+}
+
+// Two bots with jittered bets (so each faces bets its tree lacks) play legally against each other, and
+// neither one's range for the other ever empties.
+TEST(Slumbot, JitteredBotsPlayEachOtherLegally)
+{
+    const auto blueprint = std::make_unique<Mccfr<Blueprint200>>(1 << 16);
+    const PreflopStrategy<Blueprint200> preflop(*blueprint);
+    const SlumbotResolves resolves{.flop = 1, .turn = 1, .river = 2, .flopSamples = 2, .allInSamples = 2, .nested = true, .jitter = 0.3};
+    SlumbotBot<Blueprint200Config> small(preflop, resolves, 3), big(preflop, resolves, 4);
+    CfrRng rng{13};
+    std::array<int, 4> decisions{};
+    for (int hand = 0; hand < 40; ++hand)
+    {
+        Deck deck = Deck::createFullDeck();
+        const std::array<std::uint64_t, 2> hands{deck.popPair(rng).getMask(), deck.popPair(rng).getMask()};
+        std::vector<std::uint64_t> board;
+        for (int i = 0; i < 5; ++i)
+        {
+            board.push_back(deck.popRandomCards(rng, 1).getMask());
+        }
+        small.newHand(0, hands[1]);
+        big.newHand(1, hands[0]);
+        SlumbotReferee referee;
+        while (!referee.done)
+        {
+            auto &bot = referee.pos == 1 ? small : big;
+            const std::vector<std::uint64_t> seen(board.begin(), board.begin() + std::array<int, 4>{0, 3, 4, 5}[referee.street]);
+            const auto incr = bot.update(*parseSlumbotActions(referee.action), seen);
+            ASSERT_TRUE(incr.has_value()) << "hand " << hand << ": no answer after " << referee.action;
+            ASSERT_TRUE(referee.apply(*incr)) << "hand " << hand << ": illegal " << *incr << " after " << referee.action;
+            ++decisions[static_cast<std::size_t>(bot.state().street)];
+            ASSERT_GT(std::accumulate(bot.range().begin(), bot.range().end(), 0.0), 0.0) << "hand " << hand << " after " << referee.action;
+        }
+    }
+    EXPECT_GT(decisions[1], 0); // postflop, where jittered bets fall off the tree
+    EXPECT_GT(decisions[2], 0);
 }

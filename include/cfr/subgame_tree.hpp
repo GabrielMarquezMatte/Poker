@@ -5,8 +5,18 @@
 #include <bit>
 #include <limits>
 #include <map>
+#include <optional>
 #include <unordered_map>
 #include <vector>
+
+// How to build a SubgameTree (see its constructor).
+struct SubgameOptions
+{
+    bool averageLaterStreets = true;
+    double minReach = 0.0;
+    std::size_t chanceSamples = 0, allInSamples = 0;
+    std::optional<std::uint32_t> rootExtraAction; // chips the root's actor puts in, on top of the legal actions
+};
 
 // The public tree of a postflop subgame of Hunl<C>, from a street's first decision to showdown, with the
 // hands each board leaves alive: what a vector-form CFR solver over exact hands iterates on.
@@ -19,7 +29,8 @@ struct SubgameTree
 {
     using G = Hunl<C>;
     using Hands = std::array<double, holeCombos>;
-    using Strategy = std::array<double, G::maxActions>;
+    static constexpr std::size_t maxChildren = G::maxActions + 1; // with a root's extra action
+    using Strategy = std::array<double, maxChildren>;
     static constexpr std::size_t none = std::numeric_limits<std::size_t>::max();
 
     enum class Kind : std::uint8_t
@@ -57,16 +68,19 @@ struct SubgameTree
     std::size_t regrets = 0, averages = 0;                    // floats needed
     std::size_t depth = 0;
 
-    // `root` is a street's first decision; ranges[p] holds player p's reach for every hand. Hands whose
-    // reach is at most `minReach` times the largest in both ranges are left out (they play uniformly).
-    // Average strategies are kept for root-street nodes only unless `averageLaterStreets`. With
-    // `chanceSamples` > 0, each chance node deals only that many cards, drawn at random (seeded by the
-    // board and history, so the tree is reproducible); `allInSamples` does the same for the board that
-    // runs out after an all-in, whose value is all there is to those subtrees (0 deals every card).
-    SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, bool averageLaterStreets = true, double minReach = 0.0,
-                std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
-        : m_averageLaterStreets(averageLaterStreets), m_chanceSamples(chanceSamples), m_allInSamples(allInSamples)
+    // `root` is a decision (usually a street's first); ranges[p] holds player p's reach for every hand.
+    // Options: hands whose reach is at most `minReach` times the largest in both ranges are left out (they
+    // play uniformly). Average strategies are kept for root-street nodes only unless
+    // `averageLaterStreets`. With `chanceSamples` > 0, each chance node deals only that many cards, drawn
+    // at random (seeded by the board and history, so the tree is reproducible); `allInSamples` does the
+    // same for the board that runs out after an all-in, whose value is all there is to those subtrees (0
+    // deals every card). `rootExtraAction` adds an action at the root, after the legal ones (the child is
+    // G::applyTo(root, chips, number of legal actions)): a real bet the abstraction lacks.
+    SubgameTree(const typename G::State &root, const std::array<Hands, 2> &reach, const SubgameOptions &options = {})
+        : m_averageLaterStreets(options.averageLaterStreets), m_chanceSamples(options.chanceSamples), m_allInSamples(options.allInSamples),
+          m_rootExtraAction(options.rootExtraAction)
     {
+        const double minReach = options.minReach;
         const bool river = std::popcount(root.board) == 5;
         std::array<double, 2> floor{};
         for (std::size_t p = 0; p < 2; ++p)
@@ -113,7 +127,7 @@ struct SubgameTree
         const Node &node = nodes[byHistory.at(s.history)];
         const std::size_t n = node.children.size();
         Strategy out{};
-        out.fill(1.0 / static_cast<double>(n));
+        std::fill_n(out.begin(), n, 1.0 / static_cast<double>(n)); // the rest stay 0
         if (denseOf[hand] < 0)
         {
             return out;
@@ -145,6 +159,7 @@ struct SubgameTree
 private:
     bool m_averageLaterStreets;
     std::size_t m_chanceSamples, m_allInSamples;
+    std::optional<std::uint32_t> m_rootExtraAction;
     std::map<std::pair<std::uint64_t, std::size_t>, std::size_t> m_spaceOf; // by board and parent space
 
     // The space of `board`, one card more than the board of space `parentIndex`.
@@ -235,7 +250,9 @@ private:
             nodes[idx].children = std::move(children);
             return deepest;
         }
-        const std::size_t n = G::numActions(s);
+        const std::size_t legal = G::numActions(s);
+        const bool extra = idx == 0 && m_rootExtraAction.has_value();
+        const std::size_t n = legal + (extra ? 1 : 0);
         const std::size_t values = n * spaces[space].size();
         nodes[idx].offset = regrets;
         regrets += values;
@@ -247,7 +264,8 @@ private:
         for (std::size_t a = 0; a < n; ++a)
         {
             children.push_back(nodes.size());
-            deepest = std::max(deepest, build(G::apply(s, a), rootBoard, space, level + 1));
+            const auto child = a < legal ? G::apply(s, a) : G::applyTo(s, *m_rootExtraAction, a);
+            deepest = std::max(deepest, build(child, rootBoard, space, level + 1));
         }
         nodes[idx].children = std::move(children);
         return deepest;

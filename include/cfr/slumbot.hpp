@@ -143,13 +143,16 @@ struct SlumbotResolves
     std::size_t flop = 60, turn = 60, river = 100;
     std::size_t flopSamples = 6;
     std::size_t allInSamples = 16; // per card of a flop all-in's runout: 36 runouts misjudged all-ins by ~8% equity
+    bool nested = true;            // solve Slumbot's off-tree bets in; false translates them (to compare)
+    double jitter = 0.0;           // scales our postflop bets and raises by up to +/- this (for local matches)
 };
 
 // Plays Slumbot's game with a blueprint of Hunl<C> (C::stack must be 400): the blueprint's preflop, with
 // Slumbot's bets translated into the abstraction, and resolves after the flop. Postflop, a street is
-// resolved from the real state (real pot and bets) and the ranges so far; the solution is followed
-// while both players' actions are in its tree, and a new resolve starts from the real state after any
-// action that is not. Ranges are updated with every action's probability under the model that
+// resolved from the real state (real pot and bets) and the ranges so far, and the solution is followed
+// while both players' actions are in its tree. A Slumbot bet the tree lacks is solved in (nested
+// subgame solving): a new resolve from the state it was made in adds it as an extra action, so its
+// probability (to update Slumbot's range) and our answer come from one solution, without translation. Ranges are updated with every action's probability under the model that
 // produced it (the blueprint preflop, the current resolve postflop), for the opponent (range) and for
 // ourselves (beliefs, the opponent's view of our hand, which seeds our resolves). An action the model
 // can't produce leaves the range as it was.
@@ -183,6 +186,7 @@ public:
         m_slumbotIncrement = 50;
         m_slumbotTotal = 100;
         m_ourAbstract.reset();
+        m_ourIndex.reset();
         m_solvers = {};
         m_nudges = 0;
         for (std::size_t h = 0; h < holeCombos; ++h)
@@ -222,7 +226,8 @@ private:
     using FlopSolver = Resolver<CoarseTurn<PostflopRaises<C>>>;
     using TurnSolver = Resolver<CoarseRiver<PostflopRaises<C>>>;
     using RiverSolver = SubgameSolver<PostflopRaises<C>>;
-    using Strategy = typename Mccfr<G>::Strategy;
+    using Strategy = typename Mccfr<G>::Strategy;                      // the blueprint's
+    using Resolved = typename SubgameTree<PostflopRaises<C>>::Strategy; // a resolve's: may have an extra action
     static constexpr double minReach = 1e-3;
     static constexpr std::array<int, 5> boardSize{0, 3, 4, 5, 5};
 
@@ -250,6 +255,7 @@ private:
     // highest bet, the last bet or raise increment on the street, and the most either player has in.
     std::uint32_t m_slumbotBetTo = 0, m_slumbotIncrement = 0, m_slumbotTotal = 0;
     std::optional<std::size_t> m_ourAbstract; // the blueprint action behind our pending preflop action
+    std::optional<std::size_t> m_ourIndex;    // the resolve's action behind our pending postflop action (jittered)
     Range m_range{}, m_beliefs{};
     Solvers m_solvers;
     std::size_t m_nudges = 0;
@@ -349,7 +355,7 @@ private:
         return m_blueprint.averageStrategy(G::infosetKeyWithBucket(s, bucket), G::numActions(s));
     }
 
-    Strategy resolvedStrategy(std::size_t hand) const
+    Resolved resolvedStrategy(std::size_t hand) const
     {
         const Solvers &solvers = m_solvers;
         if (solvers.flop != nullptr)
@@ -364,7 +370,9 @@ private:
     }
 
     // Resolves the current street from the real state and the ranges so far.
-    void resolve()
+    // Resolves the street from the real state, with `extra` (chips the actor puts in) as an extra root
+    // action if given.
+    void resolve(std::optional<std::uint32_t> extra = std::nullopt)
     {
         std::array<Range, 2> ranges{};
         ranges[1 - m_seat] = m_range;
@@ -391,18 +399,23 @@ private:
         m_solvers.onTree = true;
         if (m_real.street == 1)
         {
-            m_solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(root), ranges, false, minReach, m_resolves.flopSamples,
-                                                          m_resolves.allInSamples);
+            m_solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(root), ranges,
+                                                          SubgameOptions{.averageLaterStreets = false,
+                                                                         .minReach = minReach,
+                                                                         .chanceSamples = m_resolves.flopSamples,
+                                                                         .allInSamples = m_resolves.allInSamples,
+                                                                         .rootExtraAction = extra});
             m_solvers.flop->solve(m_resolves.flop);
         }
         else if (m_real.street == 2)
         {
-            m_solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(root), ranges, false, minReach);
+            m_solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(root), ranges,
+                                                          SubgameOptions{.averageLaterStreets = false, .minReach = minReach, .rootExtraAction = extra});
             m_solvers.turn->solve(m_resolves.turn);
         }
         else
         {
-            m_solvers.river = std::make_unique<RiverSolver>(root, ranges, true, minReach);
+            m_solvers.river = std::make_unique<RiverSolver>(root, ranges, SubgameOptions{.minReach = minReach, .rootExtraAction = extra});
             m_solvers.river->solve(m_resolves.river);
         }
     }
@@ -476,22 +489,53 @@ private:
         }
         else
         {
-            if (!m_solvers.onTree)
+            // The action's index at the current node: a legal one, or the extra action a resolve from here adds.
+            const auto find = [&](const State &s) -> std::optional<std::size_t>
             {
-                resolve();
-            }
-            condition(weights, translate<R>(m_solvers.node, to, fraction), [&](std::size_t h) { return resolvedStrategy(h); });
-            const auto legal = R::legalActions(m_solvers.node);
-            m_solvers.onTree = false;
-            for (std::size_t a = 0; a < legal.size; ++a)
-            {
-                if (legal.to[a] == to)
+                const auto legal = R::legalActions(s);
+                for (std::size_t a = 0; a < legal.size; ++a)
                 {
-                    m_solvers.node = R::apply(m_solvers.node, a);
-                    m_solvers.onTree = m_solvers.node.street == m_real.street; // a new street is resolved afresh
-                    break;
+                    if (legal.to[a] == to)
+                    {
+                        return a;
+                    }
                 }
+                return std::nullopt;
+            };
+            std::optional<std::size_t> index = m_solvers.onTree ? find(m_solvers.node) : std::nullopt;
+            if (actor == m_seat && m_ourIndex.has_value() && !index.has_value())
+            {
+                // Our jittered bet: our range follows the action we chose; the next resolve starts from the real state.
+                condition(weights, {{*m_ourIndex, 1.0}}, [&](std::size_t h) { return resolvedStrategy(h); });
+                m_solvers.onTree = false;
             }
+            else if (!m_resolves.nested && !index.has_value())
+            {
+                // Translation: the bet's probability from the nearest sizes, then a resolve after it.
+                if (!m_solvers.onTree)
+                {
+                    resolve();
+                }
+                condition(weights, translate<R>(m_solvers.node, to, fraction), [&](std::size_t h) { return resolvedStrategy(h); });
+                m_solvers.onTree = false;
+            }
+            else if (!index.has_value())
+            {
+                index = find(m_real);
+                resolve(index.has_value() ? std::nullopt : std::optional<std::uint32_t>(to));
+                index = index.value_or(R::legalActions(m_real).size);
+            }
+            if (index.has_value())
+            {
+                condition(weights, {{*index, 1.0}}, [&](std::size_t h) { return resolvedStrategy(h); });
+                const std::size_t legal = R::legalActions(m_solvers.node).size;
+                m_solvers.node = *index < legal ? R::apply(m_solvers.node, *index) : R::applyTo(m_solvers.node, to, *index);
+                m_solvers.onTree = m_solvers.node.street == m_real.street; // a new street is resolved afresh
+            }
+        }
+        if (actor == m_seat)
+        {
+            m_ourIndex.reset();
         }
         const std::uint8_t street = m_real.street;
         m_real = R::applyTo(m_real, to, m_seen);
@@ -563,10 +607,21 @@ private:
             resolve();
         }
         const auto legal = R::legalActions(m_solvers.node);
-        return increment(legal.to[sample(resolvedStrategy(hand), legal.size)]);
+        const std::size_t a = sample(resolvedStrategy(hand), legal.size);
+        std::uint32_t to = legal.to[a];
+        const std::uint32_t facing = std::max(m_real.invested[0], m_real.invested[1]);
+        if (m_resolves.jitter > 0.0 && to != R::fold && to > facing && to < C::stack)
+        {
+            const double scale = 1.0 + m_resolves.jitter * (2.0 * uniform() - 1.0);
+            const auto jittered = static_cast<std::uint32_t>(std::lround(facing + (to - facing) * scale));
+            to = std::clamp(jittered, std::min(facing + m_real.lastRaise, C::stack), C::stack - 1);
+        }
+        m_ourIndex = a;
+        return increment(to);
     }
 
-    std::size_t sample(const Strategy &sigma, std::size_t n)
+    template <typename S>
+    std::size_t sample(const S &sigma, std::size_t n)
     {
         double r = uniform();
         for (std::size_t a = 0; a + 1 < n; ++a)

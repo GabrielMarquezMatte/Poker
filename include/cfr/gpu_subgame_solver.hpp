@@ -88,9 +88,8 @@ public:
     using Strategy = typename Tree::Strategy;
 
     // See SubgameTree for the arguments.
-    GpuSubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, bool averageLaterStreets = true, double minReach = 0.0,
-                     std::size_t chanceSamples = 0, std::size_t allInSamples = 0)
-        : m_tree(root, ranges, averageLaterStreets, minReach, chanceSamples, allInSamples), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
+    GpuSubgameSolver(const typename G::State &root, const std::array<Hands, 2> &ranges, const SubgameOptions &options = {})
+        : m_tree(root, ranges, options), m_gpu(*Gpu::instance()), m_queue(m_gpu.context, m_gpu.device),
           m_forward(m_gpu.program, "forward"), m_terminals(m_gpu.program, "terminals"), m_backward(m_gpu.program, "backward"),
           m_averages(m_tree.averages, 0.0f)
     {
@@ -165,7 +164,7 @@ private:
         std::uint8_t kind, toAct, children, folder;
     };
     static_assert(sizeof(GpuNode) == 36);
-    static_assert(G::maxActions <= 8); // MAX_ACTIONS in the kernels
+    static_assert(Tree::maxChildren <= 8); // MAX_ACTIONS in the kernels
 
     Tree m_tree;
     const Gpu &m_gpu;

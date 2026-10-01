@@ -95,14 +95,17 @@ public:
             // kept for that street only: later streets are resolved again.
             if (m_resolves.flop > 0 && s.street == 1 && solvers.flop == nullptr)
             {
-                solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(s), resolveRanges(seat, range, beliefs), false,
-                                                            minReach, m_resolves.flopSamples, m_resolves.allInSamples);
+                solvers.flop = std::make_unique<FlopSolver>(std::bit_cast<typename FlopSolver::G::State>(s), resolveRanges(seat, range, beliefs),
+                                                            SubgameOptions{.averageLaterStreets = false,
+                                                                           .minReach = minReach,
+                                                                           .chanceSamples = m_resolves.flopSamples,
+                                                                           .allInSamples = m_resolves.allInSamples});
                 solvers.flop->solve(m_resolves.flop);
             }
             if (m_resolves.turn > 0 && s.street == 2 && solvers.turn == nullptr)
             {
-                solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(s), resolveRanges(seat, range, beliefs), false,
-                                                            minReach);
+                solvers.turn = std::make_unique<TurnSolver>(std::bit_cast<typename TurnSolver::G::State>(s), resolveRanges(seat, range, beliefs),
+                                                            SubgameOptions{.averageLaterStreets = false, .minReach = minReach});
                 solvers.turn->solve(m_resolves.turn);
             }
             if (m_resolves.river > 0 && s.street == 3 && solvers.river == nullptr)
@@ -218,20 +221,29 @@ private:
         return ranges;
     }
 
+    // A resolve's strategy (with room for a root's extra action, which LBR never adds) as the blueprint's.
+    template <typename S>
+    static typename Mccfr<G>::Strategy narrow(const S &wide)
+    {
+        typename Mccfr<G>::Strategy out{};
+        std::copy_n(wide.begin(), out.size(), out.begin());
+        return out;
+    }
+
     // The strategy's policy at `s` for the player to act holding `hand` (whose bucket is `bucket`).
     typename Mccfr<G>::Strategy policy(const typename G::State &s, std::size_t hand, std::uint16_t bucket, const Solvers &solvers) const
     {
         if (s.street == 3 && solvers.river != nullptr && solvers.river->contains(s))
         {
-            return solvers.river->strategy(s, hand);
+            return narrow(solvers.river->strategy(s, hand));
         }
         if (s.street == 2 && solvers.turn != nullptr && solvers.turn->contains(s))
         {
-            return solvers.turn->strategy(s, hand);
+            return narrow(solvers.turn->strategy(s, hand));
         }
         if (s.street == 1 && solvers.flop != nullptr && solvers.flop->contains(s))
         {
-            return solvers.flop->strategy(s, hand);
+            return narrow(solvers.flop->strategy(s, hand));
         }
         return m_opponent.averageStrategy(G::infosetKeyWithBucket(s, bucket), G::numActions(s));
     }

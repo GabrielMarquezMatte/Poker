@@ -226,7 +226,7 @@ TEST(SubgameSolver, SampledChanceIsUnbiased)
     for (std::size_t k = 0; k < samples; ++k)
     {
         root.history = 0x1234 + k; // reseeds the sample
-        SubgameSolver<FlopCheckDown> sampled(root, {uniform, reach}, true, 0.0, 10);
+        SubgameSolver<FlopCheckDown> sampled(root, {uniform, reach}, {.chanceSamples = 10});
         const auto values = sampled.bestResponseValues(0);
         for (std::size_t h = 0; h < holeCombos; ++h)
         {
@@ -255,7 +255,7 @@ TEST(SubgameSolver, AllInRunoutsHaveTheirOwnSample)
     root.street = 1;
     Hands uniform{};
     uniform.fill(1.0);
-    const Tree tree(root, {uniform, uniform}, false, 0.0, 4, 10);
+    const Tree tree(root, {uniform, uniform}, {.averageLaterStreets = false, .chanceSamples = 4, .allInSamples = 10});
     std::size_t allIns = 0, streets = 0;
     for (const auto &node : tree.nodes)
     {
@@ -269,4 +269,28 @@ TEST(SubgameSolver, AllInRunoutsHaveTheirOwnSample)
     }
     EXPECT_GT(allIns, 0u);
     EXPECT_GT(streets, 0u);
+}
+
+// A root's extra action (a real bet the abstraction lacks) is one more child, solved like the others.
+TEST(SubgameSolver, RootExtraActionIsSolved)
+{
+    Hands uniform{};
+    uniform.fill(1.0);
+    const auto root = riverRoot<Nl>("2c 7d 9h Js Ks", 20);
+    const std::size_t legal = Nl::numActions(root);
+    SubgameSolver<Hunl100bbConfig> solver(root, {uniform, uniform}, {.rootExtraAction = 57}); // a bet to 57: no legal size
+    const auto &tree = solver.tree();
+    ASSERT_EQ(tree.nodes.front().children.size(), legal + 1);
+    const auto &extra = tree.nodes[tree.nodes.front().children.back()].state;
+    EXPECT_EQ(extra.invested[root.toAct], 57u);
+    EXPECT_EQ(extra.history, Nl::applyTo(root, 57, legal).history);
+    EXPECT_TRUE(solver.contains(extra)); // the answers to it are in the tree
+    solver.solve(200);
+    EXPECT_LT(solver.exploitability(), 0.01 * 40);
+    double total = 0.0;
+    for (const double p : solver.strategy(root, holeIndex(Deck::parseHand("As Ah").getMask())))
+    {
+        total += p;
+    }
+    EXPECT_NEAR(total, 1.0, 1e-6);
 }
